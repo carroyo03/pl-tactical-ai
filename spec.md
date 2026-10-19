@@ -114,3 +114,68 @@ with DuckDBRepository() as repository:
 ```
 
 Verification: `.venv/bin/python -m unittest discover -s tests -v`.
+
+## Hybrid persona narrator
+
+`src/agents/narrator.py` exposes `PersonaNarrator.narrate(episode, analysis,
+persona=..., language=...) -> NarrativeOutput`.
+
+- Supported personas: TACTICAL_ANALYST, PASSIONATE_FAN, CASUAL_VIEWER.
+- Supported languages: en, es. Unsupported values fail before client calls.
+- `tactical_breakdown` is assembled exclusively by code from the supplied engine
+  output, using localized zone/cause labels and the real pivot name. Missing
+  pivot/zone values have explicit localized descriptions.
+- The LLM receives the unchanged engine output, ID/name associations and full
+  chronologically ordered events. Equal timestamps preserve input order.
+- The scorer is inferred only from a successful scoring-team SHOT at exactly
+  timestamp_goal. Multiple candidates fail; without a known scorer, a known
+  pivot is required. Conflicting player names or an unknown pivot ID fail.
+- Only `CreativeOutput` (headline, commentary) is requested through Structured
+  Outputs. NarrativeOutput adds the deterministic tactical_breakdown.
+- Headlines contain 1–12 whitespace-separated words. Commentary must mention
+  the scorer or pivot by full name (case-insensitive, word boundaries).
+  Headline and commentary reject known internal identifiers and P_/DEF_/ev_
+  patterns. Failures raise Pydantic ValidationError, without silent retries.
+- These checks do not prove semantic truth of free-form text or verify language
+  or tone. The deterministic breakdown preserves supplied metrics; the prompt
+  forbids invented events and recalculation in creative fields.
+- `LLMClient` is injectable. Default `MockLLMClient` never imports the Azure SDK,
+  reads credentials or makes network calls. Production uses an explicitly
+  injected `AzureOpenAIClient` with an Azure SDK client and deployment name.
+- Azure refusals, missing parsed responses and incomplete completions fail
+  explicitly. Network/API errors propagate; no silent Mock fallback.
+
+### Narrator usage
+
+```python
+from src.agents.narrator import PersonaNarrator
+
+narrative = PersonaNarrator().narrate(
+    episode, result, persona='PASSIONATE_FAN', language='es',
+)
+print(narrative.model_dump_json(indent=2))
+```
+
+Production initialization (no secrets hardcoded):
+
+```python
+import os
+from openai import AzureOpenAI
+from src.agents.narrator import AzureOpenAIClient, PersonaNarrator
+
+sdk = AzureOpenAI(
+    azure_endpoint=os.environ['AZURE_OPENAI_ENDPOINT'],
+    api_key=os.environ['AZURE_OPENAI_API_KEY'],
+    api_version=os.environ['AZURE_OPENAI_API_VERSION'],
+    timeout=30.0,
+    max_retries=0,
+)
+narrator = PersonaNarrator(AzureOpenAIClient(
+    sdk, deployment=os.environ['AZURE_OPENAI_DEPLOYMENT'],
+))
+# Configure a GPT-4o deployment/API version supporting Structured Outputs.
+# Close the SDK client when the application shuts down.
+```
+
+Reference: [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+Offline narrator tests: `uv run python -m unittest discover -s tests -p 'test_narrator.py' -v`.
