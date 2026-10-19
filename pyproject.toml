@@ -1,0 +1,18 @@
+[project]
+name = "pl-tactical-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "azure-identity>=1.15.0",
+    "duckdb>=0.10.0",
+    "fastapi>=0.110.0",
+    "networkx>=3.2.1",
+    "openai>=1.14.0",
+    "pandas>=2.2.0",
+    "plotly>=5.20.0",
+    "pydantic>=2.6.0",
+    "streamlit>=1.32.0",
+    "uvicorn>=0.28.0",
+]
