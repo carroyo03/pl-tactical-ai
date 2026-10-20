@@ -12,6 +12,8 @@ from src.agents.narrator import (
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
 from src.ingest.repository import DuckDBRepository
+from src.ingest.mock_generator import generate_mock_episodes
+from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 
 DEFAULT_SAMPLE_PATH = Path(__file__).resolve().parents[2] / 'data/raw/sample_goal_episode.json'
 DEFAULT_API_VERSION = '2024-10-21'
@@ -31,7 +33,12 @@ def create_app(
     async def lifespan(app: FastAPI):
         with ExitStack() as resources:
             repository = resources.enter_context(DuckDBRepository())
-            repository.load_json(sample_path)
+            if Path(sample_path).resolve() == DEFAULT_SAMPLE_PATH:
+                # Seed from canonical fictional scenarios, never a stale local sample.
+                for payload in generate_mock_episodes():
+                    repository.save(GoalEpisode.model_validate(payload))
+            else:
+                repository.load_json(sample_path)
             selected_client = client
             if selected_client is None:
                 endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
@@ -52,6 +59,7 @@ def create_app(
             app.state.repository = repository
             app.state.engine = TacticalEngine()
             app.state.narrator = PersonaNarrator(selected_client)
+            app.state.orchestrator = BroadcastOrchestrator(selected_client)
             yield
 
     application = FastAPI(title='PL Tactical AI', lifespan=lifespan)
@@ -74,6 +82,20 @@ def create_app(
             episode, analysis, persona=persona, language=language,
         )
         return GoalIntelligenceResponse(episode=episode, analysis=analysis, narrative=narrative)
+
+    @application.get('/goals/{goal_id}/broadcast', response_model=BroadcastResponse)
+    def goal_broadcast(
+        goal_id: str, request: Request,
+        persona: Persona = 'TACTICAL_ANALYST', language: Language = 'en',
+        focus_player_id: str | None = None,
+    ) -> BroadcastResponse:
+        try:
+            episode = request.app.state.repository.get(goal_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail='Goal episode not found') from None
+        return request.app.state.orchestrator.run(
+            episode, persona=persona, language=language, focus_player_id=focus_player_id,
+        )
 
     return application
 

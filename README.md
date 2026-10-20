@@ -56,3 +56,24 @@ Each app process owns one in-memory repository. Lifespan startup loads the
 sample; shutdown closes DuckDB and any app-created Azure client. Tests can use
 `create_app(client=MockLLMClient(), sample_path=...)` to stay offline regardless
 of environment variables. Injected clients remain caller-owned.
+
+## Broadcast demo workflow
+
+Default API startup now seeds three reproducible fictional scenarios directly
+from `generate_mock_episodes()`; it does not depend on a possibly stale local
+sample. Custom `sample_path` fixtures remain isolated. Running the generator
+also writes all three JSON files for inspection.
+
+Discover the scenarios with `GET /goals`, then request, for example:
+
+```text
+GET /goals/SYNTH_GOAL_01/broadcast?persona=PASSIONATE_FAN&language=en&focus_player_id=P_04
+```
+
+The enriched response includes normalized-pitch metrics, timed overlay data,
+explicit focus participation and orchestration telemetry. The original
+`/intelligence` response still has exactly three keys. Broadcast generation uses
+three specialized roles with one feedback-driven retry and a validated degraded
+fallback. No meters or ball speeds are inferred. See spec.md for formulas, units,
+classification thresholds and limitations. Overlay rendering belongs to the
+upcoming UI; currently these are machine-readable replay markers.

@@ -210,3 +210,82 @@ Injected clients are caller-owned.
 Offline HTTP tests use TestClient as a context manager so lifespan executes,
 with an injected Mock and temporary fixture. Coverage includes discovery,
 200/404/422, localized narration, concurrent reads, OpenAPI and resource cleanup.
+
+## Broadcast enrichment and orchestration
+
+The legacy `/intelligence` contract is unchanged. The additive
+`GET /goals/{goal_id}/broadcast?persona=TACTICAL_ANALYST&language=en&focus_player_id=P_04`
+returns episode, analysis, narrative, broadcast_metrics, focus and telemetry.
+Unknown goals return 404 and unsupported persona/language values return 422.
+
+### Reproducible fictional data
+
+`generate_mock_episodes()` returns three independent deterministic episodes:
+SYNTH_GOAL_01 (quick recovery), SYNTH_GOAL_02 (central vertical breakthrough),
+SYNTH_GOAL_03 (positional attack). IDs, names, coordinates and timing are stable.
+The first episode retains the legacy geometry/player IDs and analytical result,
+using fictional Nolan Vale, Evan Rook and Milo Arden. Existing API test name
+expectations follow this fixture migration; numerical assertions remain intact.
+The generator writes the first scenario to sample_goal_episode.json and the
+others to episode_02.json and episode_03.json. Default API startup seeds all three
+from the canonical generator in memory, so stale local files cannot expose real
+player names. Custom sample_path startup still loads only that JSON fixture.
+This supersedes the single-file default startup described earlier.
+
+### Exact metric definitions
+
+All calculations are in normalized 0–100 axes. There is no physical scale.
+
+- Only scoring-team PASS events count for pass accuracy; the fraction is
+  successful_passes / total_passes in [0,1], or null with zero attempts.
+  The accuracy overlay displays the fraction multiplied by 100, unit `%`.
+- The key pass is the earliest successful scoring-team pass with maximum
+  static-snapshot packing (including zero); no eligible pass means null.
+- pass_distance_units = hypot(end_x - start_x, end_y - start_y), unrounded,
+  with explicit distance_unit=pitch_units. Its maximum is 100*sqrt(2).
+- pass_difficulty = min(100, 40*distance/(100*sqrt(2)) +
+  30*max(0,end_x-start_x)/100 + 30*min(packing/5,1)), unit score.
+  This bounded heuristic weights normalized distance (40%), positive vertical
+  gain (30%) and packing capped at five defenders (30%). It is neither measured
+  difficulty nor a completion probability. Missing end_y means distance and
+  difficulty are null; do not select a different key pass to hide missing data.
+- duration = timestamp_goal - first chronological event.timestamp_sec.
+  tempo_events_per_sec = number of all episode events / duration.
+- vertical_progression_rate = max(0,last_scoring_event.start_x -
+  first_scoring_event.start_x) / duration, unit pitch_units/sec. This is net
+  sequence-origin progression, not ball velocity or cumulative travel distance.
+- HIGH_TEMPO_CHAOS requires tempo >= 0.4 events/sec AND progression >= 4
+  pitch_units/sec. Otherwise CONTROLLED_BUILDUP. Thresholds are documented
+  heuristics, not observed tactical truth. Zero duration produces null rates
+  and classification; no scoring events also yields null progression/class.
+- timed_overlays are chronological records with event_id, timestamp_sec, label,
+  value, unit, player_id, player_name and is_focus. Timestamps use the episode's
+  absolute match-event clock; a replay UI subtracts the episode's first time.
+  Distance/difficulty overlays appear at the pass event timestamp; sequence
+  accuracy appears at the last pass timestamp. These are synthetic event replay
+  markers, not inferred ball arrival times or already-rendered live overlays.
+- Focus is explicitly present/absent with participating event IDs. All focused
+  events get involvement overlays (value 1, score unit); pass metrics also mark
+  is_focus. Unknown focus IDs are absent rather than invented players.
+
+### Distinct agents and recovery
+
+TacticalAnalystAgent computes facts, broadcast proxies and focus involvement once.
+PersonaNarratorAgent generates only the creative proposal. GuardrailCriticAgent
+validates schema/headline, scorer-or-pivot mention, internal ID leakage, and a
+mandatory focus-name mention when that player participated. It records the exact
+failure, hands off to the narrator, and passes critic_feedback in the second
+request context plus a repair instruction. There are at most two LLM calls.
+After two rejections the critic constructs and validates a deterministic fallback
+that includes required and focus names. Fallback validation failure propagates;
+programming errors are not disguised as creative failures.
+
+OrchestrationState is typed and per request. Facts are computed before generation;
+clients receive a deep copy of context so their mutations cannot change evidence.
+telemetry contains actual handoffs, generation attempts (excluding fallback),
+critic_feedback, measured latency_ms and SUCCESS/RECOVERED/DEGRADED_FALLBACK status.
+Latency covers orchestration, not HTTP transport/repository lookup. Mock timing
+is not an Azure latency estimate. Refusals and validation errors are recoverable;
+unhandled API/network failures still propagate, without silent offline fallback.
+The critic implements specified syntactic/name checks, not universal semantic
+truth verification of free-form narrative.

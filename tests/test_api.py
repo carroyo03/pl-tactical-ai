@@ -41,8 +41,8 @@ class APITests(unittest.TestCase):
         self.assertEqual(len(body['episode']['defenders_snapshot']), 5)
         self.assertEqual(body['analysis']['sequence_packing_score'], 3)
         self.assertEqual(body['analysis']['tactical_pivot'], 'P_10')
-        self.assertIn('Palmer', body['narrative']['tactical_breakdown'])
-        self.assertIn('Jackson', body['narrative']['commentary'])
+        self.assertIn('Evan Rook', body['narrative']['tactical_breakdown'])
+        self.assertIn('Milo Arden', body['narrative']['commentary'])
         self.assertNotIn('_grounding', body['narrative'])
 
     def test_spanish_and_persona(self):
@@ -96,7 +96,7 @@ class LifecycleTests(unittest.TestCase):
             self.assertIn('closed', str(failure.exception).lower())
 
     def test_environment_selects_azure_and_closes_owned_sdk(self):
-        creative = CreativeOutput(headline='Jackson scores', commentary='Jackson features in this goal sequence.')
+        creative = CreativeOutput(headline='Milo Arden scores', commentary='Milo Arden features in this goal sequence.')
         message = SimpleNamespace(parsed=creative, refusal=None)
         completion = SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason='stop')])
         environment = {
