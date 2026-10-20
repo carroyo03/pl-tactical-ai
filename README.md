@@ -33,8 +33,8 @@ Start from the project root:
 uv run uvicorn src.api.app:app --reload
 ```
 
-The application loads `data/raw/sample_goal_episode.json` into in-memory DuckDB
-at startup. Generate it first if missing:
+The default application seeds three canonical synthetic episodes in in-memory DuckDB.
+To export reproducible JSON fixtures locally:
 
 ```sh
 uv run python -m src.ingest.mock_generator
@@ -53,7 +53,7 @@ Structured Outputs. Export variables in the process environment; `.env` files
 are not loaded automatically. Partial Azure configuration uses the Mock.
 
 Each app process owns one in-memory repository. Lifespan startup loads the
-sample; shutdown closes DuckDB and any app-created Azure client. Tests can use
+canonical episodes; shutdown closes DuckDB and any app-created Azure client. Tests can use
 `create_app(client=MockLLMClient(), sample_path=...)` to stay offline regardless
 of environment variables. Injected clients remain caller-owned.
 
@@ -140,29 +140,32 @@ core analytics-only tests. They never require a browser or external network.
 
 ### First visit: a guided walkthrough
 
-1. The studio opens with the full play visible. Choose a named play in the sidebar.
-2. Select the **Key pass** milestone in the timeline to jump to the breakthrough and its on-screen facts.
-3. Select **Start replay**, then select the timeline milestones to step through the sequence.
-   **Full play** restores the overview; the slider allows manual seeking.
-4. Read **Why this goal happened** for the explanation. Change the commentary
-   style, language or focus player in the sidebar to personalize it.
-5. Open **Recovery demo / advanced** only when demonstrating an intentional
-   creative failure. Agent handoffs and earlier overlays are collapsed by default.
+1. Choose an episode under **Choose a play**. The six metrics describe the full episode.
+2. Use **Key Events** on the left to inspect a moment, the pitch and synchronized overlays.
+3. Read **Why this goal happened** on the right. Change style, language or focus there.
+   Personalization preserves the replay position; changing episodes resets it.
+4. Use **Agent behavior** above the telemetry diagram to demonstrate success,
+   one critic repair, or a validated safe fallback. Help is available in the header.
+5. Earlier overlays and agent handoffs are available in their expanders.
 
-The selected moment names the player and action above the pitch. On-screen facts
-show only active overlays; earlier ones remain available in their own expander.
-Replay controls do not make new model calls. The native dark theme in
-`.streamlit/config.toml` also styles widgets consistently; refresh the browser
-or restart Streamlit if an already-open session retains its previous appearance.
+Local canonical scenarios include an optional event-time synthetic reconstruction:
+eleven opponents including a goalkeeper, plus the participating attackers. The
+pitch advances these positions only when the corresponding event is reached.
+This is an authored illustration, labelled **Synthetic reconstruction · Offside
+not assessed**, with no claim of tracking, ball-flight timing or refereeing.
+Crosses at the key pass show the separate, immutable five-defender packing
+reference. Reconstruction positions never change packing or broadcast metrics.
 
+The legacy episode/intelligence JSON is unchanged. Only `/broadcast` adds the
+optional `reconstruction` field (`synthetic-reconstruction-v1`). External or
+modified episodes without authored frames use the existing static-snapshot view.
+The generator exports three additional `*_reconstruction.json` files alongside
+the three original episode files. Replay frames are not interpolated.
 
-### Compact studio layout
-
-Quick guide opens the walkthrough on demand from the header. A small amber
-pill identifies local failure simulation. Start replay, the event milestones
-(including Key pass), and Full play share one wrapping control strip above the
-compact clock. On narrow screens the controls wrap and the two main columns
-stack. The header retains Show controls when the sidebar is collapsed.
+At tablet widths up to 1180px, the tactical and narrative domains stack; desktop
+uses two columns. Phone layouts use two-column milestones and reflowing legends.
+Narrative/source changes invalidate cached local results. Restart the Streamlit
+process if an already-running session retains imported code from a prior version.
 
 Strict warning verification:
 

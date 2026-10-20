@@ -282,7 +282,11 @@ def main() -> None:
                             'to inspect that moment; the final **Goal shot** milestone shows the complete sequence. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
                             'Use **Agent behavior** beside the telemetry diagram to demonstrate a clean run, critic recovery or safe fallback.')
-                st.caption(source + ' / Fictional players and events. Normalized coordinates; static defensive snapshot.')
+                st.markdown('The pitch shows authored synthetic positions at each event: eleven opponents '
+                            'and the participating attackers. At the key pass, crosses show the separate '
+                            'five-defender static reference used for packing. These positions are illustrative; '
+                            'offside is not assessed.')
+                st.caption(source + ' / Fictional players and events. Normalized coordinates.')
     with st.container(key='studio_controls'):
         try:
             ids = service.list_goal_ids()
@@ -333,10 +337,17 @@ def main() -> None:
                                          format_func=behavior_labels.get)
         telemetry_slot = st.container(key='telemetry_domain')
     # Session state survives script reruns; template edits must refresh cached text.
-    template_revision = sha256(Path(narrator_module.__file__).read_bytes()).hexdigest()
+    template_revision = sha256(
+        Path(narrator_module.__file__).read_bytes()
+        + Path(__file__).with_name('service.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'ingest/mock_generator.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'agents/orchestrator.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'analytics/reconstruction.py').read_bytes()
+    ).hexdigest()
     key = (episode_key, persona, language, focus_id, mode, template_revision)
     try:
-        if st.session_state.get('_result_key') != key:
+        cached = st.session_state.get('_broadcast')
+        if st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction'):
             st.session_state['_broadcast'] = service.broadcast(
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
             )
@@ -387,15 +398,26 @@ def main() -> None:
                                           if not (annotation.xref == 'paper' and annotation.yref == 'paper'))
         figure.update_layout(margin=dict(l=14, r=20, t=24, b=48))
         with st.container(key='pitch_surface'):
-            st.markdown('<div class="pitch-legend" aria-label="Pitch legend">'
-                        '<span style="color:#E8B86D">● Key pass</span>'
-                        '<span style="color:#76ADFF">◎ Focused player</span>'
-                        '<span style="color:#E58F94">✕ Bypassed defender</span>'
-                        '<span style="color:#A6B0C3">✕ Active defender</span></div>', unsafe_allow_html=True)
+            legend = [('● Key pass', '#E8B86D'), ('◎ Focused player', '#76ADFF'),
+                      ('✕ Bypassed defender', '#E58F94'), ('✕ Active defender', '#A6B0C3')]
+            if result.reconstruction is not None:
+                legend = [('● Key pass', '#E8B86D'), ('○ Opponents', '#A6B0C3'),
+                          ('■ Goalkeeper', '#79C7B4'), ('● Attackers', '#E8ECF4')]
+                if result.focus.participated:
+                    legend.append(('◎ Focus', '#76ADFF'))
+                if frame.events[-1].event.event_id == metrics.key_pass_event_id:
+                    legend.extend([('✕ Bypassed reference', '#E58F94'), ('✕ Other reference', '#A6B0C3')])
+            st.markdown('<div class="pitch-legend" aria-label="Pitch legend">' + ''.join(
+                f'<span style="color:{color}" title="{escape("Participating attackers only" if label == "● Attackers" else label)}">{label}</span>'
+                for label, color in legend
+            ) + '</div>', unsafe_allow_html=True)
             st.plotly_chart(figure, width='stretch',
                             config={'displayModeBar': False, 'responsive': True}, theme=None, key='pitch')
         with st.container(key='pitch_note'):
-            st.caption('Defenders are a static snapshot; active/bypassed refers only to the key-pass comparison.')
+            if result.reconstruction is not None:
+                st.caption('Synthetic reconstruction · Offside not assessed')
+            else:
+                st.caption('Static packing reference · Offside not assessed')
         st.markdown('<h2 class="section-heading">On-screen facts at this moment</h2>', unsafe_allow_html=True)
         active_overlays = [item for item in frame.timed_overlays if item.is_active]
         history = [item for item in frame.timed_overlays if not item.is_active]

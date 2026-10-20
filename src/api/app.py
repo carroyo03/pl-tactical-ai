@@ -12,7 +12,7 @@ from src.agents.narrator import (
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
 from src.ingest.repository import DuckDBRepository
-from src.ingest.mock_generator import generate_mock_episodes
+from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 
 DEFAULT_SAMPLE_PATH = Path(__file__).resolve().parents[2] / 'data/raw/sample_goal_episode.json'
@@ -33,10 +33,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         with ExitStack() as resources:
             repository = resources.enter_context(DuckDBRepository())
+            app.state.reconstructions = {}
             if Path(sample_path).resolve() == DEFAULT_SAMPLE_PATH:
                 # Seed from canonical fictional scenarios, never a stale local sample.
                 for payload in generate_mock_episodes():
-                    repository.save(GoalEpisode.model_validate(payload))
+                    episode = GoalEpisode.model_validate(payload)
+                    repository.save(episode)
+                    app.state.reconstructions[episode.goal_id] = generate_mock_reconstruction(episode)
             else:
                 repository.load_json(sample_path)
             selected_client = client
@@ -95,6 +98,7 @@ def create_app(
             raise HTTPException(status_code=404, detail='Goal episode not found') from None
         return request.app.state.orchestrator.run(
             episode, persona=persona, language=language, focus_player_id=focus_player_id,
+            reconstruction=request.app.state.reconstructions.get(goal_id),
         )
 
     return application

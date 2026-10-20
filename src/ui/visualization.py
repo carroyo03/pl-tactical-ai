@@ -136,14 +136,16 @@ def build_pitch_figure(
         figure.add_shape(type='rect', x0=x0, x1=x1, y0=22, y1=78, line=dict(color='#3B4554'))
     visible_key = next((item.event for item in frame.events
                         if item.event.event_id == response.broadcast_metrics.key_pass_event_id), None)
+    current_event = frame.events[-1].event
+    show_reference = response.reconstruction is None or current_event.event_id == response.broadcast_metrics.key_pass_event_id
     defenders = response.episode.defenders_snapshot
     eliminated = [bool(visible_key and visible_key.start_x < d.x < visible_key.end_x) for d in defenders]
     figure.add_trace(go.Scatter(
         x=[d.x for d in defenders], y=[d.y for d in defenders], mode='markers',
-        name='Defensive snapshot', marker=dict(size=12, symbol='x',
+        name='Packing reference snapshot', visible=show_reference, marker=dict(size=12, symbol='x',
         color=['#E58F94' if value else '#7A8496' for value in eliminated]),
         text=[escape(d.player_id) for d in defenders],
-        customdata=[['Bypassed in key pass' if value else 'Active in key-pass comparison' if visible_key
+        customdata=[['Bypassed in key pass / static packing reference' if value else 'Active in key-pass comparison' if visible_key
                      else 'Snapshot / key pass not reached'] for value in eliminated],
         hovertemplate='<b>%{text}</b><br>%{customdata[0]}<br>X %{x:.1f} / Y %{y:.1f} pitch_units<extra></extra>',
         meta={'kind': 'defenders', 'bypassed': eliminated},
@@ -171,16 +173,43 @@ def build_pitch_figure(
         if key:
             figure.add_annotation(x=event.start_x, y=event.start_y, text='Key pass',
                                   showarrow=False, yshift=24, font=dict(color=AMBER, size=11))
-    # Paper-space legend preserves trace contracts and does not add fabricated pitch data.
-    for x, label, color in [
-        (0.0, '● Key pass', AMBER), (.26, '◎ Focused player', BLUE),
-        (.53, '✕ Bypassed defender', '#E58F94'), (.81, '✕ Active defender', '#A6B0C3'),
-    ]:
-        figure.add_annotation(x=x, y=1.09, xref='paper', yref='paper', text=label,
+    if response.reconstruction is not None:
+        selected = next(f for f in response.reconstruction.frames if f.event_id == current_event.event_id)
+        relative = selected.timestamp_sec - first
+        outfield = [p for p in selected.opponents if p.role == 'OUTFIELD']
+        goalkeeper = [p for p in selected.opponents if p.role == 'GOALKEEPER']
+        names = {e.player_id: e.player_name for e in response.episode.events}
+        for positions, kind, label, symbol, color in [
+            (outfield, 'reconstructed_opponents', 'Synthetic opponents', 'circle-open', '#A6B0C3'),
+            (goalkeeper, 'reconstructed_goalkeeper', 'Synthetic goalkeeper', 'square', '#79C7B4'),
+            (selected.attackers, 'reconstructed_attackers', 'Participating attackers', 'circle', '#E8ECF4'),
+        ]:
+            focused = [response.focus.participated and p.player_id == response.focus.player_id for p in positions]
+            figure.add_trace(go.Scatter(
+                x=[p.x for p in positions], y=[p.y for p in positions], mode='markers', name=label,
+                marker=dict(size=[14 if focused[i] else 10 for i in range(len(positions))],
+                            symbol=['circle-open' if focused[i] else symbol for i in range(len(positions))],
+                            color=[BLUE if focused[i] else color for i in range(len(positions))], line=dict(width=2)),
+                text=[escape(names.get(p.player_id, p.player_id)) for p in positions],
+                customdata=[[label, f'+{relative:.1f}s'] for p in positions],
+                hovertemplate='<b>%{text}</b><br>%{customdata[0]} / %{customdata[1]}<br>'
+                              'X %{x:.1f} / Y %{y:.1f} pitch_units<br>Synthetic reconstruction<extra></extra>',
+                meta=dict(kind=kind, event_id=selected.event_id, timestamp_sec=selected.timestamp_sec,
+                          source='AUTHORED_SYNTHETIC', is_focus=any(focused)),
+            ))
+    # Paper-space legend supports standalone figures; the studio renders reflowing HTML.
+    legend = [(0.0, 1.09, '● Key pass', AMBER), (.26, 1.09, '◎ Focused player', BLUE),
+              (.53, 1.09, '✕ Bypassed defender', '#E58F94'), (.81, 1.09, '✕ Active defender', '#A6B0C3')]
+    if response.reconstruction is not None:
+        legend = [(0.0, 1.24, '● Key pass', AMBER), (.52, 1.24, '◎ Focused player', BLUE),
+                  (0.0, 1.15, '○ Opponents / ■ goalkeeper', '#79C7B4'), (.52, 1.15, '● Participating attackers', TEXT),
+                  (0.0, 1.06, '✕ Bypassed reference', '#E58F94'), (.52, 1.06, '✕ Other packing reference', '#A6B0C3')]
+    for x, y, label, color in legend:
+        figure.add_annotation(x=x, y=y, xref='paper', yref='paper', text=label,
                               xanchor='left', showarrow=False, font=dict(size=11, color=color))
     figure.update_layout(
         paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, family=SYSTEM_FONT),
-        margin=dict(l=14, r=26, t=60, b=36), height=480, showlegend=False,
+        margin=dict(l=14, r=26, t=100 if response.reconstruction is not None else 60, b=36), height=480, showlegend=False,
         xaxis=dict(range=[0, 100], showgrid=False, zeroline=False, title='Normalized pitch / attack direction →',
                    tickvals=[0, 33.3, 66.6, 100], fixedrange=True),
         yaxis=dict(range=[0, 100], showgrid=False, zeroline=False, showticklabels=False, fixedrange=True),

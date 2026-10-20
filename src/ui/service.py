@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from src.agents.narrator import CreativeOutput, MockLLMClient, PersonaNarrator
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
-from src.ingest.mock_generator import generate_mock_episodes
+from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.ingest.repository import DuckDBRepository
 
 DemoMode = Literal['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
@@ -93,4 +93,5 @@ class StudioService:
         client = MockLLMClient() if mode == 'Normal' else DemoLLMClient(1 if mode == DEMO_MODES[1] else 2)
         return BroadcastOrchestrator(client).run(
             episode, persona=persona, language=language, focus_player_id=focus_player_id,
+            reconstruction=generate_mock_reconstruction(episode),
         )

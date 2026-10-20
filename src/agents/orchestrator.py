@@ -4,12 +4,13 @@ import re
 from time import perf_counter
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 
 from src.agents.narrator import (
     Language, LLMClient, MockLLMClient, NarrativeGenerationError,
     NarrativeOutput, NarrativeRequest, Persona, PersonaNarrator, SYSTEM_PROMPT, TONES,
 )
+from src.analytics.reconstruction import SyntheticReconstruction
 from src.analytics.broadcast import BroadcastMetrics, FocusParticipation, compute_broadcast
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
@@ -53,6 +54,13 @@ class BroadcastResponse(StrictModel):
     broadcast_metrics: BroadcastMetrics
     focus: FocusParticipation
     telemetry: ExecutionTelemetry
+    reconstruction: SyntheticReconstruction | None = None
+
+    @model_validator(mode='after')
+    def validate_reconstruction(self):
+        if self.reconstruction is not None:
+            self.reconstruction.validate_episode(self.episode)
+        return self
 
 
 class TacticalAnalystAgent:
@@ -126,8 +134,11 @@ class BroadcastOrchestrator:
         self.critic = GuardrailCriticAgent()
 
     def run(self, episode: GoalEpisode, *, persona: Persona = 'TACTICAL_ANALYST',
-            language: Language = 'en', focus_player_id: str | None = None) -> BroadcastResponse:
+            language: Language = 'en', focus_player_id: str | None = None,
+            reconstruction: SyntheticReconstruction | None = None) -> BroadcastResponse:
         started = perf_counter()
+        if reconstruction is not None:
+            reconstruction.validate_episode(episode)
         state = OrchestrationState(
             episode=episode.model_copy(deep=True), request=NarrativeRequest(persona=persona, language=language),
             focus_player_id=focus_player_id,
@@ -161,4 +172,5 @@ class BroadcastOrchestrator:
         return BroadcastResponse(
             episode=state.episode, analysis=state.analysis, narrative=state.narrative,
             broadcast_metrics=state.broadcast_metrics, focus=state.focus, telemetry=state.telemetry,
+            reconstruction=reconstruction,
         )

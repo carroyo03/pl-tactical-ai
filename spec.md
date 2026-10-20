@@ -292,117 +292,68 @@ truth verification of free-form narrative.
 
 ## Broadcast Studio UI (Step 5)
 
-### Files and runtime
+Launch with `uv run streamlit run src/ui/app.py`. Local mode runs DuckDB and the
+orchestrator in process. `API_BASE_URL` enables the existing API adapter; simulated
+failures always use a local injectable client. Tests remain offline.
 
-- `src/ui/app.py`: Streamlit control room, escaped HTML metric/narrative cards,
-  Plotly pitch, relative replay slider and full multi-agent telemetry.
-- `src/ui/visualization.py`: pure typed replay-frame filtering and figure builder.
-- `src/ui/service.py`: local DuckDB/orchestrator access, optional HTTP transport,
-  explicit local failure simulation and grounded remote-response validation.
-- `tests/test_ui.py`: offline geometry/service tests and Streamlit AppTest.
+The header holds Broadcast studio and Help. Choose a play and six full-episode
+metrics are global. Key Events, the pitch and on-screen facts form the tactical
+domain. Persona, language and focus controls sit above the editorial narrative;
+Agent behavior sits above agent telemetry. There is no sidebar, slider, autoplay
+or regeneration button. Event jumps reuse the narrative; personalization preserves
+the chosen offset; changing episodes resets to the complete sequence.
 
-Launch with `uv run streamlit run src/ui/app.py` from the project root. Local
-mode requires neither API startup nor Azure credentials and seeds fictional
-scenarios in memory. API_BASE_URL enables remote discovery/intelligence/broadcast;
-local simulation modes still use local client injection on the selected episode.
-Remote narrative JSON is validated again with reconstructed grounding context,
-since private Pydantic attributes are not serialized over HTTP.
+The clock is relative to the earliest event. Filtering includes only reached
+events and overlays; the latest reached event is active. A final goal summary
+shows duration, accuracy, maximum packing and the final shooter. Old overlays
+remain in a collapsed expander. Handoffs show actual attempts, recovery, fallback
+and critic feedback, not a simulated live processing animation.
 
-### Visual design
+Dark broadcast cards use the system San Francisco font stack, visible focus
+outlines and explicit labels. HTML legends reflow outside Plotly to avoid overlap.
+Tablet viewports up to 1180px stack domains at full width; narrower local containers
+reflow selectors and agent stages. Phone milestones form a 2x2 grid. Card padding
+and explicit flex gaps keep telemetry and handoffs separated.
 
-The pitch is the primary working surface, with commentary/audit to its right and
-six compact full-episode metrics above. Controls remain in the sidebar; Streamlit
-columns stack on narrow screens. Color tokens: canvas #090A0F, panel #11131A,
-border #1E2230, text #E8ECF4, event/focus blue #76ADFF, key-pass amber #E8B86D.
-Defenders bypassed in the static snapshot use rose; neutral defenders stay gray.
-Cards have 8px corners and tabular numerals. The Apple system font stack (San Francisco on supported Apple platforms)
-carries prose, controls, technical badges and numerical overlays, with system
-fallbacks elsewhere and tabular numerals for metrics. No fonts or
-assets are fetched from external services. No emojis, gradients or decorative
-animation. Default app chrome is hidden while sidebar reopening remains available.
-Keyboard focus is visible and reduced-motion preferences are respected.
+### Optional synthetic reconstruction v1
 
-### Replay semantics
+`GoalEpisode`, `TacticalAnalysisResponse`, and the three-key intelligence response
+are unchanged. `BroadcastResponse.reconstruction` is optional and defaults to null
+for legacy responses. It contains a literal version `synthetic-reconstruction-v1`,
+source `AUTHORED_SYNTHETIC`, offside_assessment `NOT_ASSESSED`, and `frames`.
+Each frame has an event_id, matching absolute timestamp_sec, eleven opponent
+positions (one goalkeeper), and every participating attacker's position.
+Positions contain player_id, normalized x/y and OUTFIELD/GOALKEEPER role.
 
-`filter_synchronized_overlays(response, replay_offset_sec)` returns a ReplayFrame
-with visible ReplayEvent and ReplayOverlay wrappers, relative_sec and is_active.
-The origin is the first chronological event; duration is timestamp_goal minus
-that origin. Finite offsets clamp to [0,duration]; nonfinite inputs raise
-ValueError. Inclusion is <= the absolute cutoff (origin + offset), avoiding
-floating-point subtraction noise at event boundaries. All events sharing the
-latest reached event timestamp are active. Overlays are active only when their
-timestamp equals that event timestamp; historical overlays remain visible but
-muted. A later event without an overlay deactivates earlier overlays. The clock
-is a manual synthetic replay control, not a claim of live video ingestion.
+Validation requires exactly one frame per event, no duplicate IDs, stable opponent
+and goalkeeper identities, all known participating attackers, and current-actor
+coordinates equal to the event's recorded origin. Coordinates remain 0-100
+pitch_units. No frame is interpolated, no ball-flight timing is assumed, and
+no offside verdict is calculated.
 
-`build_pitch_figure(response, replay_offset_sec=None)` shows all events by default
-or only reached events with a supplied clock offset. Axes are exactly 0–100;
-thirds are 33.3 and 66.6. The key successful pass has an amber stroke; a focused
-player has open markers. Static defenders are shown throughout, but bypassed
-coloring and key-pass annotations activate only after that pass is reached.
-Packing uses the same strict start_x < defender.x < end_x rule. Static snapshot
-positions are never interpolated as if tracking data existed.
+The generator authors frames only for an exact canonical synthetic episode.
+Unknown or modified episodes receive no invented reconstruction. Each frame uses
+a defensive formation with an authored deep cover player and goalkeeper, plus
+plausible positions for known attackers before their recorded actions. These are
+illustrations, not observed tracking or a physics simulation. Episode pass endpoints
+are destinations, not player positions or evidence of ball arrival at that timestamp.
+Separate `*_reconstruction.json` exports preserve the original episode files.
 
-### Interaction and state
+Default API seeds and local UI requests attach these frames to broadcast responses.
+Custom sample/API episodes without enrichment keep the legacy snapshot view.
+At a selected event, the pitch renders that frame's opponents, goalkeeper and
+participating attackers. The focused attacker has a blue ring. Future frames
+are never displayed. The UI always labels this view **Synthetic reconstruction ·
+Offside not assessed**.
 
-The controls select episode, persona, en/es language, optional participating or
-absent focus player, and Normal/single-retry/double-failure modes. Each simulated
-run creates a fresh injected client and executes the real critic/retry/fallback
-path. Simulation status is explicitly labelled. Session state retains the
-validated response by source/episode/persona/language/focus/mode: moving the
-clock does not invoke generation. Episode changes reset focus; narrative-control
-changes reset the clock. Regenerate narrative explicitly requests another run.
-Top metrics and commentary are labelled full-episode analysis; synchronized
-pitch/overlays alone represent the currently reached replay time.
+Packing, key-pass selection and difficulty still use `defenders_snapshot` only.
+Its five reference defenders remain unchanged. Crosses expose that static evidence
+only at the key-pass milestone, visibly distinguished from the event-time circles
+and goalkeeper square. The synthetic frames cannot enter the tactical engine or
+alter the immutable narrative breakdown. The narrative receives the original
+engine/event context, not the authored reconstruction.
 
-HTTP requests have a bounded timeout and actionable error/empty states; discovery
-and episode payloads are validated. Remote episode discovery currently needs an
-intelligence request per selected episode, which can invoke the backend model.
-There is no automatic dotenv loading. UI tests mock HTTP and use offline clients;
-core latency measurements must not be presented as Streamlit startup timings.
-
-### Guided studio UX refinement
-
-The initial replay clock now shows the full episode, making the play visible on
-first entry. The Key pass timeline milestone is the direct access to the breakthrough; Start replay resets to zero,
-Next event advances to the next strictly later event timestamp, and Show full
-play seeks to the goal. Buttons update session state through callbacks before
-the slider is rendered and reuse the same narrative. Empty-duration episodes
-remain at zero. This supersedes the initial zero-offset UI default.
-
-Friendly episode/commentary/language labels retain canonical IDs internally.
-A brief first-visit walkthrough explains the workflow; the currently reached
-player/action is displayed above the pitch. Active overlays are shown directly;
-historical overlays and handoff details are collapsed until requested, while
-status/attempts/latency remain visible. Failure injection is grouped under
-Recovery demo / advanced. Native dark widget theming comes from
-`.streamlit/config.toml`; the established broadcast palette/cards remain.
-
-### Consolidated replay navigation
-
-Timeline milestones now provide the single per-event jump control. Next event
-and overlay Go to buttons have been removed to avoid redundant seeking actions.
-Transport retains Start replay and Show full play; the slider is
-still available. Overlay times are absolute positions within the relative replay,
-not increments or playback-speed multipliers. Streamlit's native sidebar expand
-button remains in the visible header and is labelled Show controls; the toolbar
-must not be hidden because it contains this button in the installed version.
-
-
-### Compact broadcast workspace
-
-The header now groups the title, status and single-line simulation indicator;
-Quick guide uses an on-demand native popover. Expanded-sidebar desktop mode
-uses 1rem top padding; collapsed-sidebar mode reserves space for the native
-Show controls button. Metrics use 8px/12px padding. One horizontal, wrapping
-control strip contains Start replay, timeline milestones and Full play, with
-no duplicate key-pass action or intermediate instructional rows. The slider
-remains below. Selected moment uses a compact card, and the chart renders at
-420px in the studio while the pure plotting helper keeps its default height.
-Responsive wrapping and mobile column stacking preserve control access; actual
-above-the-fold coverage varies with viewport, zoom and narrative length.
-
-Tests explicitly close the mocked HTTPError and AppTest's module-owned temporary
-directory. The known bare-thread AppTest initialization diagnostic is captured
-and asserted specifically; application logging is not disabled. The complete
-suite can run with Python warnings treated as errors.
+Tests cover reproducibility across all scenarios, strict frame validation,
+clock boundaries, player positions, optional legacy parsing, metric invariance,
+and API compatibility. Run the complete suite with
+`uv run python -W error -m unittest discover -s tests -v`.
