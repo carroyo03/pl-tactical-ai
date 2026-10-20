@@ -1,4 +1,4 @@
-"""Offline tests; no Azure credentials, SDK import or network required."""
+"""Offline tests; no Azure credentials or network required."""
 from types import SimpleNamespace
 import unittest
 

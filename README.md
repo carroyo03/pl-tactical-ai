@@ -3,12 +3,16 @@
 Install dependencies and the project as an editable package:
 
 ```sh
-uv sync
+uv sync --locked
 ```
 
 `uv run` automatically synchronizes the project environment. Imports such as
 `from src.analytics.schemas import GoalEpisode` work from any project directory
 because the project is installed, rather than relying on the working directory.
+
+The checked-in `.python-version` selects Python 3.14.2; the supported minor is
+3.14. The lockfile pins the tested dependencies. Install `uv`, then run commands
+from the project root. No generated data files or Azure credentials are required.
 
 Run all tests from the project root:
 
@@ -172,3 +176,47 @@ Strict warning verification:
 ```sh
 uv run python -W error -m unittest discover -s tests -v
 ```
+
+## Reliability and provider transparency
+
+The editorial card reports the actual final narrative source: **Offline mock**,
+**Azure OpenAI**, or **Offline fallback**. Telemetry separately reports the generator
+that attempted the drafts. Older remote APIs without this metadata display
+**Provider not reported**. Local studio mode always uses the Mock; Azure environment
+variables apply to the API process. To use it, start the API with exported Azure
+variables and set `API_BASE_URL=http://127.0.0.1:8000` for Streamlit. `.env.example`
+is a reference template, not an automatically loaded configuration file.
+
+The critic audits recognized English/Spanish packing and defender counts (digits
+and number words), labelled accuracy/difficulty/distance, numeric values, explicit
+zones and known-player pivot/scorer/key-pass claims. It rejects unsupported physical
+units. This is a bounded deterministic audit, not a proof that every possible
+paraphrase or nonnumeric sentence is true. Reviewed bilingual Mock templates
+remain the token-free default; there is no automatic translation dependency.
+
+Production SDK requests have a 10-second timeout, zero SDK retries and a
+600-completion-token cap. The broadcast orchestrator makes at most two attempts.
+Timeouts, connection failures, 429, transient 408/409/5xx responses, explicit refusals
+and invalid drafts enter the existing bounded recovery/fallback path. Feedback
+contains sanitized failure categories, not raw upstream response bodies. Local
+fallback latency is not Azure latency; two failed requests can take roughly
+20 seconds plus processing. Authentication/configuration errors and programming
+bugs propagate for correction. The legacy intelligence route returns 503 for
+recoverable provider unavailability; its success JSON keeps the original three keys.
+
+Check the complete suite and actual local server startup:
+
+```sh
+uv run --locked python -W error -m unittest discover -s tests -v
+uv run --locked python scripts/check_startup.py
+```
+
+The startup check launches FastAPI and Streamlit on ephemeral **127.0.0.1** ports,
+checks real HTTP readiness, verifies offline broadcast and the legacy contract,
+and closes both processes. It deliberately removes Azure variables from its child
+processes so it cannot spend model tokens. Streamlit rendering and interaction are
+covered separately by AppTest; the health check is not a browser visual test.
+
+Do not expose the paid API publicly before adding authentication and request/cost
+controls. This repository has not yet demonstrated a real Azure deployment or
+provider quality/latency evaluation.

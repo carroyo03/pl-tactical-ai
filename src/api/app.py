@@ -6,8 +6,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 
 from src.agents.narrator import (
-    AzureOpenAIClient, Language, LLMClient, MockLLMClient,
-    NarrativeOutput, Persona, PersonaNarrator,
+    AZURE_REQUEST_TIMEOUT_SEC, AzureOpenAIClient, Language, LLMClient, MockLLMClient,
+    NarrativeGenerationError, NarrativeOutput, Persona, PersonaNarrator,
 )
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
@@ -53,7 +53,7 @@ def create_app(
                     sdk = AzureOpenAI(
                         azure_endpoint=endpoint, api_key=api_key,
                         api_version=os.getenv('AZURE_OPENAI_API_VERSION', DEFAULT_API_VERSION),
-                        timeout=30.0, max_retries=0,
+                        timeout=AZURE_REQUEST_TIMEOUT_SEC, max_retries=0,
                     )
                     resources.callback(sdk.close)
                     selected_client = AzureOpenAIClient(sdk, deployment)
@@ -81,9 +81,12 @@ def create_app(
         except KeyError:
             raise HTTPException(status_code=404, detail='Goal episode not found') from None
         analysis = request.app.state.engine.analyze(episode)
-        narrative = request.app.state.narrator.narrate(
-            episode, analysis, persona=persona, language=language,
-        )
+        try:
+            narrative = request.app.state.narrator.narrate(
+                episode, analysis, persona=persona, language=language,
+            )
+        except NarrativeGenerationError:
+            raise HTTPException(status_code=503, detail='Narrative provider temporarily unavailable') from None
         return GoalIntelligenceResponse(episode=episode, analysis=analysis, narrative=narrative)
 
     @application.get('/goals/{goal_id}/broadcast', response_model=BroadcastResponse)

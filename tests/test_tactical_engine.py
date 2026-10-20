@@ -1,19 +1,23 @@
 import copy
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from pydantic import ValidationError
 from src.analytics.schemas import GoalEpisode
 from src.analytics.tactical_engine import TacticalEngine
 from src.ingest.repository import DuckDBRepository
-
-SAMPLE = Path(__file__).resolve().parents[1] / 'data/raw/sample_goal_episode.json'
+from src.ingest.mock_generator import generate_mock_episodes
 
 
 class TacticalTests(unittest.TestCase):
     def setUp(self):
-        self.payload = json.loads(SAMPLE.read_text())
+        self.payload = generate_mock_episodes()[0]
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.sample_path = Path(directory.name) / 'episode.json'
+        self.sample_path.write_text(json.dumps(self.payload), encoding='utf-8')
         self.engine = TacticalEngine()
 
     def analyze(self):
@@ -21,7 +25,7 @@ class TacticalTests(unittest.TestCase):
 
     def test_repository_to_engine(self):
         with DuckDBRepository() as repo:
-            episode = repo.load_json(SAMPLE)
+            episode = repo.load_json(self.sample_path)
             self.assertEqual(repo.get(episode.goal_id), episode)
             self.assertEqual(self.engine.analyze(repo.get(episode.goal_id)).model_dump(), {
                 'sequence_packing_score': 3,

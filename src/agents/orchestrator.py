@@ -23,12 +23,17 @@ class Handoff(StrictModel):
     reason: str
 
 
+Provider = Literal['OFFLINE_MOCK', 'AZURE_OPENAI', 'OFFLINE_FALLBACK', 'CUSTOM', 'UNKNOWN']
+
+
 class ExecutionTelemetry(StrictModel):
     handoffs: list[Handoff] = Field(default_factory=list)
     attempts: Annotated[int, Field(ge=0, le=2)] = 0
     critic_feedback: list[str] = Field(default_factory=list)
     latency_ms: Annotated[float, Field(ge=0)] = 0.0
     status: Literal['RUNNING', 'SUCCESS', 'RECOVERED', 'DEGRADED_FALLBACK'] = 'RUNNING'
+    generation_provider: Provider = 'UNKNOWN'
+    narrative_provider: Provider = 'UNKNOWN'
 
 
 class OrchestrationState(StrictModel):
@@ -68,10 +73,11 @@ class TacticalAnalystAgent:
         state.analysis = TacticalEngine().analyze(state.episode)
         state.broadcast_metrics, state.focus = compute_broadcast(state.episode, state.focus_player_id)
         state.context, state.tactical_breakdown, state.grounding = PersonaNarrator().prepare(
-            state.episode, state.analysis, **state.request.model_dump(),
+            state.episode, state.analysis, broadcast_metrics=state.broadcast_metrics, **state.request.model_dump(),
         )
         state.context['focus'] = state.focus.model_dump()
         state.context['broadcast_metrics'] = state.broadcast_metrics.model_dump()
+
 
 
 class PersonaNarratorAgent:
@@ -125,6 +131,7 @@ class GuardrailCriticAgent:
         if not self.audit(state):
             raise ValueError('Deterministic fallback failed grounding; episode data requires correction')
         state.telemetry.status = 'DEGRADED_FALLBACK'
+        state.telemetry.narrative_provider = 'OFFLINE_FALLBACK'
 
 
 class BroadcastOrchestrator:
@@ -143,6 +150,8 @@ class BroadcastOrchestrator:
             episode=episode.model_copy(deep=True), request=NarrativeRequest(persona=persona, language=language),
             focus_player_id=focus_player_id,
         )
+        provider = getattr(self.narrator.client, 'provider', 'CUSTOM')
+        state.telemetry.generation_provider = provider if provider in ('OFFLINE_MOCK', 'AZURE_OPENAI') else 'CUSTOM'
         self.analyst.run(state)
         state.telemetry.handoffs.append(Handoff(
             from_agent='TacticalAnalystAgent', to_agent='PersonaNarratorAgent', attempt=1,
@@ -156,6 +165,7 @@ class BroadcastOrchestrator:
             ))
             if self.critic.audit(state):
                 state.telemetry.status = 'SUCCESS' if attempt == 1 else 'RECOVERED'
+                state.telemetry.narrative_provider = state.telemetry.generation_provider
                 break
             if attempt == 1:
                 state.telemetry.handoffs.append(Handoff(

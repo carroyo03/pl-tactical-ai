@@ -357,3 +357,40 @@ Tests cover reproducibility across all scenarios, strict frame validation,
 clock boundaries, player positions, optional legacy parsing, metric invariance,
 and API compatibility. Run the complete suite with
 `uv run python -W error -m unittest discover -s tests -v`.
+
+
+## Pre-Azure reliability baseline
+
+- `agents/grounding.py` audits explicit English/Spanish claims against immutable
+  request facts: maximum packing and defender counts, labelled pass metrics,
+  allowed numeric values (0/1/2 decimal rounding), exact zone labels, and selected
+  known-player pivot/scorer/key-pass constructions. Digit-bearing player names
+  are preserved. Physical distance/speed units are rejected because no such
+  measurements exist. Number words are supported from zero to twenty. Negation,
+  arbitrary paraphrases, unrecognized role phrasing, invented proper names and
+  broader semantic truth are not comprehensively validated; do not advertise
+  zero hallucination for free creative text.
+- The same Pydantic audit applies to direct narration and critic validation.
+  Broadcast metrics are passed into narrator preparation once; facts are never
+  recomputed to fit rejected drafts. Invalid explicit claims trigger one real
+  repair attempt, then the existing deterministic fallback.
+- `ExecutionTelemetry.generation_provider` and `narrative_provider` distinguish
+  OFFLINE_MOCK, AZURE_OPENAI, OFFLINE_FALLBACK, CUSTOM and UNKNOWN. Defaults preserve
+  parsing of older broadcast responses. These fields are added only to enriched
+  telemetry; the legacy three-key intelligence contract remains intact.
+- Azure adapter exceptions map timeouts, connection failures, 429, transient
+  408/409/5xx and truncated output to sanitized recoverable errors. Production SDK
+  timeout is 10 seconds, SDK max_retries is zero, output cap is 600 tokens and
+  orchestration allows two calls maximum. There are no blocking backoff sleeps.
+  Nonrecoverable authentication/configuration and system errors propagate.
+  `/intelligence` returns 503 on recoverable provider unavailability; `/broadcast`
+  may recover or return a valid OFFLINE_FALLBACK narrative with degraded status.
+- Six offline persona/language variants use reviewed event-grounded templates,
+  correct sentence joining and singular/plural defender forms. The first action,
+  key-pass author, pivot and scorer remain distinct. No crowd reactions, player
+  intentions or additional match events are inferred from missing data.
+- Python is constrained to the tested 3.14 minor and `.python-version` selects
+  3.14.2. Streamlit/OpenAI lower bounds match the tested APIs; `uv sync --locked`
+  reproduces the lockfile. Tests generate their own canonical fixtures and require
+  no ignored `data/raw` files. `scripts/check_startup.py` checks real loopback
+  server startup without Azure credentials or persistent child processes.

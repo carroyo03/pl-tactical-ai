@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
+from src.agents.grounding import audit_tactical_claims
+from src.analytics.broadcast import BroadcastMetrics, compute_broadcast
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 
 if TYPE_CHECKING:
@@ -61,6 +63,8 @@ class NarrativeOutput(CreativeOutput):
             for identifier in grounding['internal_ids']:
                 if re.search(r'(?<!\w)' + re.escape(identifier) + r'(?!\w)', text):
                     raise ValueError('Internal IDs must not appear in narrative text')
+        if 'facts' in grounding:
+            audit_tactical_claims(self.headline + ' ' + self.commentary, grounding['facts'])
         # Preserve validated context for nested response-model revalidation.
         self._grounding = grounding
         return self
@@ -85,128 +89,138 @@ Player references such as Evan Rook (P_10) associate names with IDs internally; 
 only player names, never IDs. Commentary must mention the scorer or tactical pivot.
 Generate only headline (at most 12 whitespace-separated words) and commentary.
 Do not generate tactical_breakdown. Follow the requested language and persona.
+Only state numeric facts supplied in context. Defender counts mean the engine maximum
+packing on one pass, never a sum. Do not confuse the tactical pivot with the key-pass author.
 """
 
 
 class MockLLMClient:
-    """Offline deterministic stand-in with distinct, event-grounded voices."""
+    """Reviewed bilingual templates; no network, translation model or random sampling."""
+    provider = 'OFFLINE_MOCK'
+
     def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
         persona, language = context['persona'], context['language']
-        events = sorted(context['events'], key=lambda item: item['timestamp_sec'])
-        first = events[0] if events else None
+        spanish = language == 'es'
+        events = sorted(context['events'], key=lambda event: event['timestamp_sec'])
         pivot, scorer = context['pivot_name'], context['scorer_name']
         packing = context['analysis']['sequence_packing_score']
-        key_event_id = context.get('broadcast_metrics', {}).get('key_pass_event_id')
-        key_pass = next((event for event in events if event['event_id'] == key_event_id), None)
-        passes = [event for event in events if event['event_type'] == 'PASS']
+        key_id = context.get('broadcast_metrics', {}).get('key_pass_event_id')
         cause = context['analysis']['tactical_cause']
-
         causes = {
-            'en': {
-                'Quick transition after recovery': 'a swift counterattack',
-                'Central breakthrough through a vertical pass': 'a vertical pass through the middle',
-                'Positional attack': 'a patient positional attack',
-            },
-            'es': {
-                'Quick transition after recovery': 'una contra rápida tras la recuperación',
-                'Central breakthrough through a vertical pass': 'un pase vertical por el centro',
-                'Positional attack': 'un ataque posicional paciente',
-            },
-        }[language]
-        cause_phrase = causes.get(cause, 'the attack' if language == 'en' else 'el ataque')
-        if language == 'en':
-            if first and first['event_type'] == 'RECOVERY':
-                openings = {
-                    'TACTICAL_ANALYST': f"The recovery by {first['player_name']} opens the route for {cause_phrase}.",
-                    'PASSIONATE_FAN': f"{first['player_name']} wins it back and launches the counter!",
-                    'CASUAL_VIEWER': f"{first['player_name']} wins the ball and starts the attack.",
-                }
-            else:
-                openings = {
-                    'TACTICAL_ANALYST': f'The move develops through {cause_phrase}.',
-                    'PASSIONATE_FAN': f'The crowd rises as {cause_phrase} gathers pace!',
-                    'CASUAL_VIEWER': f'The team builds through {cause_phrase}.',
-                }
-            action_lines = [
-                (f"{event['player_name']} releases the key pass" if event is key_pass else
-                 f"Then {event['player_name']} sends it forward" if event['end_x'] > event['start_x'] else
-                 f"Then {event['player_name']} plays the next pass") for index, event in enumerate(passes)
-            ]
-            pivot_line = (f"{pivot} stands out as the most central link in the move"
-                          if pivot and (not key_pass or pivot != key_pass['player_name']) else '')
-            evidence = (f'The defensive snapshot places {packing} opponents bypassed on the highest-packing pass.'
-                        if packing else 'The key pass bypasses no defenders in the defensive snapshot.')
-            finish = (f'{scorer} finishes the move with the goal-scoring shot.' if scorer
-                      else 'The sequence ends without an identified scorer.')
+            'Quick transition after recovery': ('a quick transition after the recovery', 'una transición rápida tras la recuperación'),
+            'Central breakthrough through a vertical pass': ('a vertical breakthrough through the middle', 'una ruptura central con un pase vertical'),
+            'Positional attack': ('a positional attack', 'un ataque posicional'),
+        }
+        cause_text = causes[cause][spanish]
+        first = events[0]
+        actor = first['player_name']
+        if first['event_type'] == 'RECOVERY' and first['is_successful']:
+            start = f'{actor} recupera el balón' if spanish else f'{actor} wins possession'
+        elif first['event_type'] == 'CARRY':
+            start = f'{actor} inicia la jugada con una conducción' if spanish else f'{actor} starts the move with a carry'
+        else:
+            start = f'{actor} abre la secuencia' if spanish else f'{actor} opens the sequence'
+        if spanish:
+            openings = {
+                'TACTICAL_ANALYST': f'{start}: así toma forma {cause_text}.',
+                'PASSIONATE_FAN': f'¡{start}! La jugada se construye con {cause_text}.',
+                'CASUAL_VIEWER': f'{start}. El equipo desarrolla {cause_text}.',
+            }
             headlines = {
-                'TACTICAL_ANALYST': f'{scorer or pivot}: a precise route to goal',
-                'PASSIONATE_FAN': f'{scorer or pivot} finishes a thrilling move!',
-                'CASUAL_VIEWER': f'How {scorer or pivot} finds the finish',
+                'TACTICAL_ANALYST': f'{scorer or pivot}: las claves de la jugada',
+                'PASSIONATE_FAN': f'¡{scorer or pivot} pone el broche a la jugada!',
+                'CASUAL_VIEWER': f'Así se construye el gol de {scorer or pivot}',
             }
         else:
-            if first and first['event_type'] == 'RECOVERY':
-                openings = {
-                    'TACTICAL_ANALYST': f"La recuperación de {first['player_name']} abre paso a {cause_phrase}.",
-                    'PASSIONATE_FAN': f"¡{first['player_name']} recupera y lanza la contra!",
-                    'CASUAL_VIEWER': f"{first['player_name']} recupera el balón y activa el ataque.",
-                }
-            else:
-                openings = {
-                    'TACTICAL_ANALYST': f'La jugada toma forma con {cause_phrase}.',
-                    'PASSIONATE_FAN': f'¡La grada se levanta: {cause_phrase} y el ataque va a más!',
-                    'CASUAL_VIEWER': f'El equipo prepara {cause_phrase}.',
-                }
-            action_lines = [
-                (f"{event['player_name']} encuentra el pase clave" if event is key_pass else
-                 f"Después, {event['player_name']} juega hacia delante" if event['end_x'] > event['start_x'] else
-                 f"Después, {event['player_name']} juega el siguiente pase") for index, event in enumerate(passes)
-            ]
-            pivot_line = (f'{pivot} destaca como el enlace más central de la jugada'
-                          if pivot and (not key_pass or pivot != key_pass['player_name']) else '')
-            evidence = (f'La instantánea defensiva registra {packing} rivales superados en el pase con mayor packing.'
-                        if packing else 'El pase clave no supera defensores en la instantánea defensiva.')
-            finish = (f'{scorer} culmina la jugada con el disparo del gol.' if scorer
-                      else 'La secuencia termina sin goleador identificado.')
-            headlines = {
-                'TACTICAL_ANALYST': f'{scorer or pivot}: una secuencia bien construida',
-                'PASSIONATE_FAN': f'¡{scorer or pivot} culmina una gran jugada!',
-                'CASUAL_VIEWER': f'Así encuentra {scorer or pivot} el camino al gol',
+            openings = {
+                'TACTICAL_ANALYST': f'{start}, setting up {cause_text}.',
+                'PASSIONATE_FAN': f'{start}! The move takes shape through {cause_text}.',
+                'CASUAL_VIEWER': f'{start}. The team builds {cause_text}.',
             }
-        if not action_lines:
-            action_lines = ['The ball moves through the team' if language == 'en'
-                            else 'El balón progresa entre los compañeros']
-        if pivot_line:
-            action_lines.append(pivot_line)
-        action_summary = '. '.join(action_lines).rstrip('.') + '.'
-        commentary = ' '.join((openings[persona], action_summary, evidence, finish))
+            headlines = {
+                'TACTICAL_ANALYST': f'{scorer or pivot}: the move behind the finish',
+                'PASSIONATE_FAN': f'{scorer or pivot} puts the finishing touch on it!',
+                'CASUAL_VIEWER': f'How the team builds the goal for {scorer or pivot}',
+            }
+        actions = []
+        for event in events:
+            if event['event_type'] != 'PASS':
+                continue
+            name = event['player_name']
+            if not event['is_successful']:
+                action = f'{name} intenta un pase que no se completa' if spanish else f'{name} attempts a pass that does not come off'
+            elif event['event_id'] == key_id:
+                action = f'{name} encuentra el pase clave' if spanish else f'{name} finds the key pass'
+            elif event['end_x'] > event['start_x']:
+                action = f'{name} juega hacia delante' if spanish else f'{name} sends the ball forward'
+            else:
+                action = f'{name} completa su pase' if spanish else f'{name} completes the pass'
+            actions.append(action)
+        action_text = ('; después, ' if spanish else '; then ').join(actions)
+        if action_text:
+            action_text += '.'
+        if spanish:
+            links = {
+                'TACTICAL_ANALYST': f'{pivot} es el pivote táctico de la red de pases.',
+                'PASSIONATE_FAN': f'{pivot} es el enlace en el corazón de la jugada.',
+                'CASUAL_VIEWER': f'{pivot} es la pieza que más conecta la jugada.',
+            }
+            unit = 'defensor' if packing == 1 else 'defensores'
+            evidence = (f'En la instantánea defensiva, el pase de mayor packing supera a {packing} {unit}.'
+                        if packing else 'No se supera a ningún defensor en la instantánea defensiva.')
+            finishes = {
+                'TACTICAL_ANALYST': f'{scorer} culmina la secuencia con el remate del gol.',
+                'PASSIONATE_FAN': f'¡Y {scorer} pone el gol como broche final!',
+                'CASUAL_VIEWER': f'{scorer} termina la jugada con el disparo que acaba en gol.',
+            }
+        else:
+            links = {
+                'TACTICAL_ANALYST': f'{pivot} is the tactical pivot in the passing network.',
+                'PASSIONATE_FAN': f'{pivot} is the link at the heart of the move.',
+                'CASUAL_VIEWER': f'{pivot} is the key connector in the move.',
+            }
+            unit = 'defender' if packing == 1 else 'defenders'
+            evidence = (f'Against the defensive snapshot, the highest-packing pass bypasses {packing} {unit}.'
+                        if packing else 'No defenders are bypassed in the defensive snapshot.')
+            finishes = {
+                'TACTICAL_ANALYST': f'{scorer} completes the sequence with the goal-scoring shot.',
+                'PASSIONATE_FAN': f'And {scorer} supplies the finish — goal!',
+                'CASUAL_VIEWER': f'{scorer} finishes the move with the shot that scores.',
+            }
+        finish = finishes[persona] if scorer else (
+            'El goleador no está identificado.' if spanish else 'The scorer is not identified.'
+        )
+        commentary = ' '.join(part for part in (openings[persona], action_text, links[persona] if pivot else '', evidence, finish) if part)
         focus = context.get('focus', {})
         if focus.get('participated') and not re.search(
             r'(?<!\w)' + re.escape(focus['player_name']) + r'(?!\w)', commentary, re.IGNORECASE,
         ):
-            actions = [event for event in events if event['player_id'] == focus['player_id']]
-            count = len(actions)
-            if language == 'es':
-                focus_lines = {
-                    'TACTICAL_ANALYST': f"{focus['player_name']} aporta {count} intervenciones a esta secuencia.",
-                    'PASSIONATE_FAN': f"¡También cuenta {focus['player_name']}, con {count} acciones en la jugada!",
-                    'CASUAL_VIEWER': f"Fíjate también en {focus['player_name']}: participa en {count} acciones.",
-                }
-            else:
-                focus_lines = {
-                    'TACTICAL_ANALYST': f"{focus['player_name']} contributes {count} actions to the sequence.",
-                    'PASSIONATE_FAN': f"And {focus['player_name']} plays a part too, with {count} actions in the move!",
-                    'CASUAL_VIEWER': f"Watch {focus['player_name']} too: there are {count} actions to follow in this move.",
-                }
-            commentary += ' ' + focus_lines[persona]
-        return CreativeOutput(headline=headlines[persona], commentary=commentary)
-
+            focus_events = [event for event in events if event['player_id'] == focus['player_id']]
+            roles = {
+                'CARRY': ('a carry', 'una conducción'), 'RECOVERY': ('a recovery', 'una recuperación'),
+                'DEFENSIVE_DUEL': ('a defensive duel', 'un duelo defensivo'),
+                'PASS': ('a pass', 'un pase'), 'SHOT': ('a shot', 'un disparo'),
+            }
+            role = roles[focus_events[0]['event_type']][spanish]
+            commentary += (f" La aportación de {focus['player_name']} incluye {role}." if spanish else
+                           f" {focus['player_name']}'s contribution includes {role}.")
+        headline = headlines[persona]
+        if len(headline.split()) > 12:
+            headline = 'Las claves de la jugada del gol' if spanish else 'The move behind the goal'
+        return CreativeOutput(headline=headline, commentary=commentary)
 
 class NarrativeGenerationError(ValueError):
     """Recoverable upstream refusal or incomplete structured response."""
 
 
+AZURE_REQUEST_TIMEOUT_SEC = 10.0
+AZURE_MAX_COMPLETION_TOKENS = 600
+
+
 class AzureOpenAIClient:
     """Explicit production adapter; deployment is an Azure deployment name."""
+    provider = 'AZURE_OPENAI'
+
     def __init__(self, client: AzureOpenAI, deployment: str):
         if not deployment.strip():
             raise ValueError('An Azure deployment name is required')
@@ -214,14 +228,33 @@ class AzureOpenAIClient:
         self.deployment = deployment
 
     def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
-        completion = self.client.chat.completions.parse(
-            model=self.deployment,
-            messages=[
-                {'role': 'system', 'content': system_prompt},
-                {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)},
-            ],
-            response_format=CreativeOutput,
-        )
+        from openai import (APIConnectionError, APIStatusError, APITimeoutError,
+                            LengthFinishReasonError, RateLimitError)
+
+        try:
+            completion = self.client.chat.completions.parse(
+                model=self.deployment,
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)},
+                ],
+                response_format=CreativeOutput,
+                timeout=AZURE_REQUEST_TIMEOUT_SEC,
+                max_completion_tokens=AZURE_MAX_COMPLETION_TOKENS,
+            )
+        except APITimeoutError:
+            raise NarrativeGenerationError('Azure request timed out') from None
+        except APIConnectionError:
+            raise NarrativeGenerationError('Azure connection unavailable') from None
+        except RateLimitError:
+            raise NarrativeGenerationError('Azure rate limit reached (429)') from None
+        except LengthFinishReasonError:
+            raise NarrativeGenerationError('Azure response exceeded the output limit') from None
+        except APIStatusError as error:
+            if error.status_code in (408, 409) or error.status_code >= 500:
+                raise NarrativeGenerationError(f'Azure temporarily unavailable ({error.status_code})') from None
+            # Authentication, permissions and malformed configuration need correction.
+            raise
         if not completion.choices:
             raise NarrativeGenerationError('Azure returned no choices')
         choice = completion.choices[0]
@@ -257,7 +290,8 @@ class PersonaNarrator:
         return self.validate(creative.model_dump(), breakdown, grounding)
 
     def prepare(self, episode: GoalEpisode, analysis: TacticalAnalysisResponse,
-                *, persona: Persona, language: Language) -> tuple[dict, str, dict]:
+                *, persona: Persona, language: Language,
+                broadcast_metrics: BroadcastMetrics | None = None) -> tuple[dict, str, dict]:
         request = NarrativeRequest(persona=persona, language=language)
         events = sorted(episode.events, key=lambda event: event.timestamp_sec)
         players = {}
@@ -276,8 +310,11 @@ class PersonaNarrator:
         scorer = goals[0].player_name if goals else None
         if not scorer and not pivot:
             raise ValueError('A known scorer or tactical pivot is required')
+        metrics = broadcast_metrics if broadcast_metrics is not None else compute_broadcast(episode)[0]
+        key_pass = next((e for e in events if e.event_id == metrics.key_pass_event_id), None)
         context = {
             **request.model_dump(),
+            'broadcast_metrics': metrics.model_dump(),
             'analysis': analysis.model_dump(),
             'players': {key: f'{name} ({key})' for key, name in players.items()},
             'pivot_name': pivot,
@@ -290,6 +327,16 @@ class PersonaNarrator:
                        *(d.player_id for d in episode.defenders_snapshot)}
         return context, self._breakdown(analysis, pivot, request.language), {
             'required_names': [n for n in (scorer, pivot) if n], 'internal_ids': identifiers,
+            'facts': {
+                'analysis': analysis.model_dump(), 'known_names': list(players.values()),
+                'pivot_name': pivot, 'scorer_name': scorer,
+                'broadcast_metrics': metrics.model_dump(),
+                'key_pass_player_name': key_pass.player_name if key_pass else None,
+                'allowed_numbers': [len(events), episode.timestamp_goal - events[0].timestamp_sec,
+                                    *[e.timestamp_sec - events[0].timestamp_sec for e in events],
+                                    *[e.timestamp_sec for e in events],
+                                    *[sum(e.player_id == player_id for e in events) for player_id in players]],
+            },
         }
 
     @staticmethod

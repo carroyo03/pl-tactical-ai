@@ -223,6 +223,12 @@ PERSONA_LABELS = {
 }
 
 
+PROVIDER_LABELS = {
+    'OFFLINE_MOCK': 'Offline mock', 'AZURE_OPENAI': 'Azure OpenAI',
+    'OFFLINE_FALLBACK': 'Offline fallback', 'CUSTOM': 'Custom client', 'UNKNOWN': 'Provider not reported',
+}
+
+
 def seek_replay(offset: float) -> None:
     """Widget callback updates the clock before Streamlit redraws it."""
     st.session_state['replay_clock'] = offset
@@ -342,12 +348,13 @@ def main() -> None:
         + Path(__file__).with_name('service.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'ingest/mock_generator.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'agents/orchestrator.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'agents/grounding.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'analytics/reconstruction.py').read_bytes()
     ).hexdigest()
     key = (episode_key, persona, language, focus_id, mode, template_revision)
     try:
         cached = st.session_state.get('_broadcast')
-        if st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction'):
+        if st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction') or not hasattr(cached.telemetry, 'narrative_provider'):
             st.session_state['_broadcast'] = service.broadcast(
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
             )
@@ -358,6 +365,8 @@ def main() -> None:
         return
     telemetry = result.telemetry
     status = telemetry.status
+    narrative_provider = PROVIDER_LABELS[telemetry.narrative_provider]
+    generation_provider = PROVIDER_LABELS[telemetry.generation_provider]
     simulated = mode != 'Normal'
     analysis, metrics = result.analysis, result.broadcast_metrics
     pivot = next((event.player_name for event in episode.events if event.player_id == analysis.tactical_pivot), 'Unavailable')
@@ -452,7 +461,8 @@ def main() -> None:
         html_card(f'<h2 class="narrative-headline">{escape(result.narrative.headline)}</h2>'
                   '<div class="editorial-badges">'
                   f'<span class="editorial-pill">{escape(PERSONA_LABELS[persona])} · {language.upper()}</span>'
-                  f'<span class="editorial-pill">Focus: {escape(focus_text)}</span></div>'
+                  f'<span class="editorial-pill">Focus: {escape(focus_text)}</span>'
+                  f'<span class="editorial-pill">Source: {narrative_provider}</span></div>'
                   f'<p class="commentary">{escape(result.narrative.commentary)}</p>'
                   '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
                   f'<div class="fact-strip">{chips}</div>'
@@ -463,7 +473,7 @@ def main() -> None:
         with st.container(key='telemetry'):
             render_pipeline(telemetry, f'<div class="bento"><strong>{outcome}</strong>'
                       f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
-                      f'<div class="caption">Orchestration latency: {telemetry.latency_ms:.2f} ms / '
+                      f'<div class="caption">Generator: {generation_provider}<br>Orchestration latency: {telemetry.latency_ms:.2f} ms / '
                       f'{"Local simulation" if simulated else escape(source)}</div></div>')
             with st.container(key='handoff_panel'):
                 with st.expander('Inspect agent handoffs', expanded=simulated):

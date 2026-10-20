@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from src.agents.narrator import CreativeOutput, MockLLMClient, PersonaNarrator
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
+from src.analytics.broadcast import BroadcastMetrics
 from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
 from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.ingest.repository import DuckDBRepository
@@ -23,6 +24,8 @@ class StudioServiceError(ValueError):
 
 class DemoLLMClient:
     """New instance per run: fail once or twice, then use the offline client."""
+    provider = 'OFFLINE_MOCK'
+
     def __init__(self, failures: int):
         self.failures = failures
         self.calls = 0
@@ -38,7 +41,10 @@ def parse_broadcast(payload: dict, *, persona: str, language: str) -> BroadcastR
     """Restore grounding when JSON crosses HTTP; private Pydantic context is not serialized."""
     episode = GoalEpisode.model_validate(payload['episode'])
     analysis = TacticalAnalysisResponse.model_validate(payload['analysis'])
-    _, _, grounding = PersonaNarrator().prepare(episode, analysis, persona=persona, language=language)
+    metrics = BroadcastMetrics.model_validate(payload['broadcast_metrics'])
+    _, _, grounding = PersonaNarrator().prepare(
+        episode, analysis, persona=persona, language=language, broadcast_metrics=metrics,
+    )
     return BroadcastResponse.model_validate(payload, context=grounding)
 
 

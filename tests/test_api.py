@@ -11,8 +11,7 @@ from fastapi.testclient import TestClient
 
 from src.agents.narrator import CreativeOutput, MockLLMClient
 from src.api.app import create_app
-
-SAMPLE = Path(__file__).resolve().parents[1] / 'data/raw/sample_goal_episode.json'
+from src.ingest.mock_generator import generate_mock_episodes
 
 
 class APITests(unittest.TestCase):
@@ -20,7 +19,7 @@ class APITests(unittest.TestCase):
     def setUpClass(cls):
         cls.directory = TemporaryDirectory()
         cls.addClassCleanup(cls.directory.cleanup)
-        payload = json.loads(SAMPLE.read_text())
+        payload = generate_mock_episodes()[0]
         payload['goal_id'] = 'test-goal'
         cls.sample_path = Path(cls.directory.name) / 'episode.json'
         cls.sample_path.write_text(json.dumps(payload))
@@ -106,8 +105,7 @@ class LifecycleTests(unittest.TestCase):
             'AZURE_OPENAI_API_VERSION': '2024-10-21',
         }
         sdk_type = MagicMock()
-        fake_module = SimpleNamespace(AzureOpenAI=sdk_type)
-        with patch.dict('os.environ', environment, clear=True), patch.dict('sys.modules', {'openai': fake_module}):
+        with patch.dict('os.environ', environment, clear=True), patch('openai.AzureOpenAI', sdk_type):
             sdk = sdk_type.return_value
             sdk.chat.completions.parse.return_value = completion
             with TestClient(create_app()) as http:
@@ -115,6 +113,10 @@ class LifecycleTests(unittest.TestCase):
                 response = http.get(f'/goals/{goal_id}/intelligence')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(sdk.chat.completions.parse.call_args.kwargs['model'], 'test-gpt4o')
+                self.assertEqual(sdk_type.call_args.kwargs['max_retries'], 0)
+                self.assertEqual(sdk_type.call_args.kwargs['timeout'], 10.0)
+                broadcast = http.get(f'/goals/{goal_id}/broadcast').json()
+                self.assertEqual(broadcast['telemetry']['narrative_provider'], 'AZURE_OPENAI')
             sdk.close.assert_called_once_with()
 
 
