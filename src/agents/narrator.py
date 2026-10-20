@@ -129,8 +129,8 @@ class MockLLMClient:
                 }
             action_lines = [
                 (f"{event['player_name']} releases the key pass" if event is key_pass else
-                 f"then {event['player_name']} sends it forward" if event['end_x'] > event['start_x'] else
-                 f"then {event['player_name']} plays the next pass") for index, event in enumerate(passes)
+                 f"Then {event['player_name']} sends it forward" if event['end_x'] > event['start_x'] else
+                 f"Then {event['player_name']} plays the next pass") for index, event in enumerate(passes)
             ]
             pivot_line = (f"{pivot} stands out as the most central link in the move"
                           if pivot and (not key_pass or pivot != key_pass['player_name']) else '')
@@ -158,8 +158,8 @@ class MockLLMClient:
                 }
             action_lines = [
                 (f"{event['player_name']} encuentra el pase clave" if event is key_pass else
-                 f"después, {event['player_name']} juega hacia delante" if event['end_x'] > event['start_x'] else
-                 f"después, {event['player_name']} juega el siguiente pase") for index, event in enumerate(passes)
+                 f"Después, {event['player_name']} juega hacia delante" if event['end_x'] > event['start_x'] else
+                 f"Después, {event['player_name']} juega el siguiente pase") for index, event in enumerate(passes)
             ]
             pivot_line = (f'{pivot} destaca como el enlace más central de la jugada'
                           if pivot and (not key_pass or pivot != key_pass['player_name']) else '')

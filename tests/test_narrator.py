@@ -58,6 +58,7 @@ class NarratorTests(unittest.TestCase):
                 self.assertIn('Jackson', result.commentary)
                 self.assertIn('Palmer', result.commentary)
                 self.assertIn('3', result.commentary)
+                self.assertNotRegex(result.commentary, r'(?:^|[.!?]\s+)(?:then|después)\b')
                 self.assertIn('instantánea defensiva' if language == 'es' else 'defensive snapshot', result.commentary)
                 self.assertLess(result.commentary.index('Caicedo'), result.commentary.index('Jackson'))
                 self.assertIn('Palmer', result.tactical_breakdown)

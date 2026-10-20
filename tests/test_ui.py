@@ -260,10 +260,16 @@ class StreamlitTests(unittest.TestCase):
                 self.assertAlmostEqual(app.session_state['replay_clock'], 3.5,
                                        'Personalizing the story must preserve the selected pitch moment')
             self.assertTrue(app.session_state['_broadcast'].focus.participated)
+            self.assertFalse(any(button.key == 'regenerate_narrative' for button in app.button))
             generations = len(calls)
-            app.button(key='regenerate_narrative').click().run()
-            self.assertEqual(len(calls), generations + 1)
+            current_key = app.session_state['_result_key']
+            with self.assertLogs('streamlit.runtime.scriptrunner_utils.script_run_context', level='WARNING') as captured:
+                app.session_state['_result_key'] = (*current_key[:-1], 'outdated-template-revision')
+            self.assertTrue(all('missing ScriptRunContext' in record.getMessage() for record in captured.records))
+            app.run()
+            self.assertEqual(len(calls), generations + 1, 'Template changes must invalidate old narrative text')
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
+            self.assertNotIn('. después', app.session_state['_broadcast'].narrative.commentary)
             app.selectbox(key='focus').set_value('P_99').run()
             self.assertFalse(app.session_state['_broadcast'].focus.participated)
             app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()

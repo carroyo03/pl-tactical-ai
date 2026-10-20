@@ -1,9 +1,12 @@
 """Broadcast control room. Launch: uv run streamlit run src/ui/app.py."""
 from html import escape
+from hashlib import sha256
+from pathlib import Path
 import os
 
 import streamlit as st
 
+from src.agents import narrator as narrator_module
 from src.ui.service import DEMO_MODES, StudioService, StudioServiceError
 from src.ui.visualization import (
     build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
@@ -192,8 +195,6 @@ button:focus-visible, input:focus-visible, [role="combobox"]:focus-visible {outl
  .st-key-narrative_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
  .st-key-narrative_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
  .st-key-narrative_controls [data-testid="stColumn"]:first-child {grid-column:1 / -1;}
- .st-key-agent_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:minmax(0,1fr);gap:12px;}
- .st-key-agent_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
  .pipeline {flex-direction:column;}
  .pipeline-arrow {display:none;}
  .agent-stage {overflow-wrap:normal;word-break:normal;}
@@ -225,11 +226,6 @@ PERSONA_LABELS = {
 def seek_replay(offset: float) -> None:
     """Widget callback updates the clock before Streamlit redraws it."""
     st.session_state['replay_clock'] = offset
-
-
-def regenerate_narrative() -> None:
-    """Invalidate the cached narrative before the next script run."""
-    st.session_state.pop('_result_key', None)
 
 
 def render_overlay(item) -> None:
@@ -283,7 +279,7 @@ def main() -> None:
         with help_column.container(horizontal_alignment='right'):
             with st.popover('Help'):
                 st.markdown('Use **Choose a play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
-                            'to inspect that moment; the final milestone shows the full play. '
+                            'to inspect that moment; the final **Goal shot** milestone shows the complete sequence. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
                             'Use **Agent behavior** beside the telemetry diagram to demonstrate a clean run, critic recovery or safe fallback.')
                 st.caption(source + ' / Fictional players and events. Normalized coordinates; static defensive snapshot.')
@@ -328,18 +324,17 @@ def main() -> None:
         editorial_slot = st.container(key='editorial_domain')
         st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
         with st.container(key='agent_controls'):
-            agent_controls = st.columns([1.4, 1], vertical_alignment='bottom', gap='small')
             behavior_labels = dict(zip(DEMO_MODES, [
                 'Clean run (first-pass success)',
                 'Single mistake (critic recovers)',
                 'Repeated mistake (safe fallback)',
             ]))
-            mode = agent_controls[0].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
+            mode = st.selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
                                          format_func=behavior_labels.get)
-            agent_controls[1].button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative,
-                                     width='stretch', wrap=True)
         telemetry_slot = st.container(key='telemetry_domain')
-    key = (episode_key, persona, language, focus_id, mode)
+    # Session state survives script reruns; template edits must refresh cached text.
+    template_revision = sha256(Path(narrator_module.__file__).read_bytes()).hexdigest()
+    key = (episode_key, persona, language, focus_id, mode, template_revision)
     try:
         if st.session_state.get('_result_key') != key:
             st.session_state['_broadcast'] = service.broadcast(
@@ -378,8 +373,6 @@ def main() -> None:
                 columns = st.columns(len(timeline), gap='small')
                 for number, (column, milestone) in enumerate(zip(columns, timeline), 1):
                     label = milestone.label
-                    if number == len(timeline):
-                        label += ' / Full play'
                     with column:
                         st.button(f'{number}. +{milestone.relative_sec:.1f}s · {label}  \n'
                                   f'{milestone.player_name}',
