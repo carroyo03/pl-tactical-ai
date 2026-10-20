@@ -5,7 +5,7 @@ import json
 import re
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 
@@ -44,21 +44,25 @@ class CreativeOutput(StrictModel):
 
 class NarrativeOutput(CreativeOutput):
     tactical_breakdown: Text
+    _grounding: dict | None = PrivateAttr(default=None)
 
     @model_validator(mode='after')
     def audit_grounding(self, info: ValidationInfo):
-        if not info.context:
+        grounding = info.context or self._grounding
+        if not grounding:
             raise ValueError('Narrative validation requires grounding context')
-        names = info.context['required_names']
+        names = grounding['required_names']
         if not any(re.search(r'(?<!\w)' + re.escape(name) + r'(?!\w)',
                              self.commentary, flags=re.IGNORECASE) for name in names):
             raise ValueError('Commentary must mention the scorer or tactical pivot by name')
         for text in (self.headline, self.commentary):
             if re.search(r'\b(?:P|DEF|ev)_\w+\b', text, flags=re.IGNORECASE):
                 raise ValueError('Internal IDs must not appear in narrative text')
-            for identifier in info.context['internal_ids']:
+            for identifier in grounding['internal_ids']:
                 if re.search(r'(?<!\w)' + re.escape(identifier) + r'(?!\w)', text):
                     raise ValueError('Internal IDs must not appear in narrative text')
+        # Preserve validated context for nested response-model revalidation.
+        self._grounding = grounding
         return self
 
 

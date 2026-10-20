@@ -179,3 +179,34 @@ narrator = PersonaNarrator(AzureOpenAIClient(
 
 Reference: [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 Offline narrator tests: `uv run python -m unittest discover -s tests -p 'test_narrator.py' -v`.
+
+## API orchestration
+
+`src/api/app.py` defines `create_app(client=None, sample_path=...)` and `app`.
+Startup uses FastAPI lifespan to load the sample episode into DuckDB and select
+an explicitly injected client, environment-configured Azure, or the default
+Mock, in that order. The sample path defaults relative to the project files,
+not the process working directory. Startup failures fail explicitly. ExitStack
+closes DuckDB and app-owned Azure resources on shutdown or startup failure.
+Injected clients are caller-owned.
+
+- `GET /goals` returns a sorted `list[str]` of available goal IDs.
+- `GET /goals/{goal_id}/intelligence` runs repository.get, engine.analyze and
+  narrator.narrate sequentially. Optional query parameters default to
+  `persona=TACTICAL_ANALYST` and `language=en` and use the narrator's literals.
+- `GoalIntelligenceResponse` inherits StrictModel with exactly three fields:
+  episode (GoalEpisode), analysis (TacticalAnalysisResponse), narrative
+  (NarrativeOutput). The validated narrative privately retains grounding context
+  so nested Pydantic revalidation does not bypass the original guardrails.
+- Unknown episodes return 404; invalid query values return 422. Pipeline or
+  upstream failures propagate as server failures rather than silent fallbacks.
+- Synchronous route handlers use FastAPI's threadpool. Repository operations
+  lock the shared connection through execute/fetch; LLM calls do not hold the
+  database lock. Each worker process has its own independent in-memory store.
+- Azure requires nonblank AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY and
+  AZURE_OPENAI_DEPLOYMENT; partial configuration selects Mock.
+  AZURE_OPENAI_API_VERSION defaults to 2024-10-21; no automatic dotenv loading.
+
+Offline HTTP tests use TestClient as a context manager so lifespan executes,
+with an injected Mock and temporary fixture. Coverage includes discovery,
+200/404/422, localized narration, concurrent reads, OpenAPI and resource cleanup.
