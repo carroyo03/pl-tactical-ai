@@ -4,4 +4,6 @@ primaryColor = "#76ADFF"
 backgroundColor = "#090A0F"
 secondaryBackgroundColor = "#11131A"
 textColor = "#E8ECF4"
-font = "sans-serif"
+font = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif'
+headingFont = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif'
+codeFont = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif'

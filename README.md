@@ -141,9 +141,9 @@ core analytics-only tests. They never require a browser or external network.
 ### First visit: a guided walkthrough
 
 1. The studio opens with the full play visible. Choose a named play in the sidebar.
-2. Select **View key pass** to jump to the breakthrough and its on-screen facts.
-3. Select **Start replay**, then **Next event** to step through the sequence.
-   **Show full play** restores the overview; the slider allows manual seeking.
+2. Select the **Key pass** milestone in the timeline to jump to the breakthrough and its on-screen facts.
+3. Select **Start replay**, then select the timeline milestones to step through the sequence.
+   **Full play** restores the overview; the slider allows manual seeking.
 4. Read **Why this goal happened** for the explanation. Change the commentary
    style, language or focus player in the sidebar to personalize it.
 5. Open **Recovery demo / advanced** only when demonstrating an intentional
@@ -154,3 +154,18 @@ show only active overlays; earlier ones remain available in their own expander.
 Replay controls do not make new model calls. The native dark theme in
 `.streamlit/config.toml` also styles widgets consistently; refresh the browser
 or restart Streamlit if an already-open session retains its previous appearance.
+
+
+### Compact studio layout
+
+Quick guide opens the walkthrough on demand from the header. A small amber
+pill identifies local failure simulation. Start replay, the event milestones
+(including Key pass), and Full play share one wrapping control strip above the
+compact clock. On narrow screens the controls wrap and the two main columns
+stack. The header retains Show controls when the sidebar is collapsed.
+
+Strict warning verification:
+
+```sh
+uv run python -W error -m unittest discover -s tests -v
+```

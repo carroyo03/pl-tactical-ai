@@ -89,37 +89,115 @@ Do not generate tactical_breakdown. Follow the requested language and persona.
 
 
 class MockLLMClient:
-    """Offline deterministic stand-in, with distinct localized persona styles."""
+    """Offline deterministic stand-in with distinct, event-grounded voices."""
     def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
-        name = context['scorer_name'] or context['pivot_name']
-        persona = context['persona']
-        if context['language'] == 'es':
+        persona, language = context['persona'], context['language']
+        events = sorted(context['events'], key=lambda item: item['timestamp_sec'])
+        first = events[0] if events else None
+        pivot, scorer = context['pivot_name'], context['scorer_name']
+        packing = context['analysis']['sequence_packing_score']
+        key_event_id = context.get('broadcast_metrics', {}).get('key_pass_event_id')
+        key_pass = next((event for event in events if event['event_id'] == key_event_id), None)
+        passes = [event for event in events if event['event_type'] == 'PASS']
+        cause = context['analysis']['tactical_cause']
+
+        causes = {
+            'en': {
+                'Quick transition after recovery': 'a swift counterattack',
+                'Central breakthrough through a vertical pass': 'a vertical pass through the middle',
+                'Positional attack': 'a patient positional attack',
+            },
+            'es': {
+                'Quick transition after recovery': 'una contra rápida tras la recuperación',
+                'Central breakthrough through a vertical pass': 'un pase vertical por el centro',
+                'Positional attack': 'un ataque posicional paciente',
+            },
+        }[language]
+        cause_phrase = causes.get(cause, 'the attack' if language == 'en' else 'el ataque')
+        if language == 'en':
+            if first and first['event_type'] == 'RECOVERY':
+                openings = {
+                    'TACTICAL_ANALYST': f"The recovery by {first['player_name']} opens the route for {cause_phrase}.",
+                    'PASSIONATE_FAN': f"{first['player_name']} wins it back and launches the counter!",
+                    'CASUAL_VIEWER': f"{first['player_name']} wins the ball and starts the attack.",
+                }
+            else:
+                openings = {
+                    'TACTICAL_ANALYST': f'The move develops through {cause_phrase}.',
+                    'PASSIONATE_FAN': f'The crowd rises as {cause_phrase} gathers pace!',
+                    'CASUAL_VIEWER': f'The team builds through {cause_phrase}.',
+                }
+            action_lines = [
+                (f"{event['player_name']} releases the key pass" if event is key_pass else
+                 f"then {event['player_name']} sends it forward" if event['end_x'] > event['start_x'] else
+                 f"then {event['player_name']} plays the next pass") for index, event in enumerate(passes)
+            ]
+            pivot_line = (f"{pivot} stands out as the most central link in the move"
+                          if pivot and (not key_pass or pivot != key_pass['player_name']) else '')
+            evidence = (f'The defensive snapshot places {packing} opponents bypassed on the highest-packing pass.'
+                        if packing else 'The key pass bypasses no defenders in the defensive snapshot.')
+            finish = (f'{scorer} finishes the move with the goal-scoring shot.' if scorer
+                      else 'The sequence ends without an identified scorer.')
             headlines = {
-                'TACTICAL_ANALYST': f'{name}: análisis de la secuencia del gol',
-                'PASSIONATE_FAN': f'¡Gol! ¡Qué momento para {name}!',
-                'CASUAL_VIEWER': f'El gol de {name}, explicado de forma sencilla',
-            }
-            comments = {
-                'TACTICAL_ANALYST': f'{name} destaca en la secuencia registrada. Los datos tácticos se detallan abajo.',
-                'PASSIONATE_FAN': f'¡Qué emoción con {name} en esta jugada de gol!',
-                'CASUAL_VIEWER': f'{name} aparece en esta jugada de gol. Abajo puedes ver los datos explicados.',
+                'TACTICAL_ANALYST': f'{scorer or pivot}: a precise route to goal',
+                'PASSIONATE_FAN': f'{scorer or pivot} finishes a thrilling move!',
+                'CASUAL_VIEWER': f'How {scorer or pivot} finds the finish',
             }
         else:
+            if first and first['event_type'] == 'RECOVERY':
+                openings = {
+                    'TACTICAL_ANALYST': f"La recuperación de {first['player_name']} abre paso a {cause_phrase}.",
+                    'PASSIONATE_FAN': f"¡{first['player_name']} recupera y lanza la contra!",
+                    'CASUAL_VIEWER': f"{first['player_name']} recupera el balón y activa el ataque.",
+                }
+            else:
+                openings = {
+                    'TACTICAL_ANALYST': f'La jugada toma forma con {cause_phrase}.',
+                    'PASSIONATE_FAN': f'¡La grada se levanta: {cause_phrase} y el ataque va a más!',
+                    'CASUAL_VIEWER': f'El equipo prepara {cause_phrase}.',
+                }
+            action_lines = [
+                (f"{event['player_name']} encuentra el pase clave" if event is key_pass else
+                 f"después, {event['player_name']} juega hacia delante" if event['end_x'] > event['start_x'] else
+                 f"después, {event['player_name']} juega el siguiente pase") for index, event in enumerate(passes)
+            ]
+            pivot_line = (f'{pivot} destaca como el enlace más central de la jugada'
+                          if pivot and (not key_pass or pivot != key_pass['player_name']) else '')
+            evidence = (f'La instantánea defensiva registra {packing} rivales superados en el pase con mayor packing.'
+                        if packing else 'El pase clave no supera defensores en la instantánea defensiva.')
+            finish = (f'{scorer} culmina la jugada con el disparo del gol.' if scorer
+                      else 'La secuencia termina sin goleador identificado.')
             headlines = {
-                'TACTICAL_ANALYST': f'{name}: analysing the goal sequence',
-                'PASSIONATE_FAN': f'Goal! What a moment for {name}!',
-                'CASUAL_VIEWER': f'The {name} goal sequence, simply explained',
+                'TACTICAL_ANALYST': f'{scorer or pivot}: una secuencia bien construida',
+                'PASSIONATE_FAN': f'¡{scorer or pivot} culmina una gran jugada!',
+                'CASUAL_VIEWER': f'Así encuentra {scorer or pivot} el camino al gol',
             }
-            comments = {
-                'TACTICAL_ANALYST': f'{name} features in the recorded sequence. The tactical evidence is detailed below.',
-                'PASSIONATE_FAN': f'What excitement with {name} in this goal sequence!',
-                'CASUAL_VIEWER': f'{name} appears in this goal sequence. The details below explain the data.',
-            }
-        commentary = comments[persona]
+        if not action_lines:
+            action_lines = ['The ball moves through the team' if language == 'en'
+                            else 'El balón progresa entre los compañeros']
+        if pivot_line:
+            action_lines.append(pivot_line)
+        action_summary = '. '.join(action_lines).rstrip('.') + '.'
+        commentary = ' '.join((openings[persona], action_summary, evidence, finish))
         focus = context.get('focus', {})
-        if focus.get('participated'):
-            commentary += (f" Participación destacada: {focus['player_name']}." if context['language'] == 'es'
-                           else f" Featured involvement: {focus['player_name']}.")
+        if focus.get('participated') and not re.search(
+            r'(?<!\w)' + re.escape(focus['player_name']) + r'(?!\w)', commentary, re.IGNORECASE,
+        ):
+            actions = [event for event in events if event['player_id'] == focus['player_id']]
+            count = len(actions)
+            if language == 'es':
+                focus_lines = {
+                    'TACTICAL_ANALYST': f"{focus['player_name']} aporta {count} intervenciones a esta secuencia.",
+                    'PASSIONATE_FAN': f"¡También cuenta {focus['player_name']}, con {count} acciones en la jugada!",
+                    'CASUAL_VIEWER': f"Fíjate también en {focus['player_name']}: participa en {count} acciones.",
+                }
+            else:
+                focus_lines = {
+                    'TACTICAL_ANALYST': f"{focus['player_name']} contributes {count} actions to the sequence.",
+                    'PASSIONATE_FAN': f"And {focus['player_name']} plays a part too, with {count} actions in the move!",
+                    'CASUAL_VIEWER': f"Watch {focus['player_name']} too: there are {count} actions to follow in this move.",
+                }
+            commentary += ' ' + focus_lines[persona]
         return CreativeOutput(headline=headlines[persona], commentary=commentary)
 
 

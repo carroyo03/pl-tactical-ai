@@ -1,6 +1,7 @@
 """Pure replay-clock filtering and normalized-pitch plotting."""
 from dataclasses import dataclass
 from math import isfinite
+from html import escape
 
 import plotly.graph_objects as go
 
@@ -8,6 +9,7 @@ from src.agents.orchestrator import BroadcastResponse
 from src.analytics.broadcast import TimedOverlay
 from src.analytics.schemas import MatchEvent
 
+SYSTEM_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif'
 BACKGROUND = '#090A0F'
 PANEL = '#11131A'
 BLUE = '#76ADFF'
@@ -61,6 +63,58 @@ def filter_synchronized_overlays(
     )
 
 
+@dataclass(frozen=True)
+class EventMilestone:
+    event_id: str
+    relative_sec: float
+    label: str
+    player_name: str
+    is_current: bool
+    is_reached: bool
+
+
+@dataclass(frozen=True)
+class GoalSequenceSummary:
+    duration_sec: float
+    pass_accuracy: float | None
+    maximum_packing: int
+    final_shooter: str | None
+
+
+def build_event_timeline(response: BroadcastResponse, replay_offset_sec: float) -> list[EventMilestone]:
+    """All chronological milestones, including future steps; only reached steps are current."""
+    frame = filter_synchronized_overlays(response, replay_offset_sec)
+    start = min(e.timestamp_sec for e in response.episode.events)
+    current_ids = {item.event.event_id for item in frame.events if item.is_active}
+    reached_ids = {item.event.event_id for item in frame.events}
+    milestones = []
+    for event in sorted(response.episode.events, key=lambda item: item.timestamp_sec):
+        goal_shot = (event.event_type == 'SHOT' and event.is_successful
+                     and event.team == response.episode.scoring_team
+                     and event.timestamp_sec == response.episode.timestamp_goal)
+        label = ('Goal shot' if goal_shot else 'Key pass' if event.event_id == response.broadcast_metrics.key_pass_event_id
+                 else event.event_type.replace('_', ' ').capitalize())
+        milestones.append(EventMilestone(event.event_id, event.timestamp_sec - start,
+                                        label, event.player_name, event.event_id in current_ids,
+                                        event.event_id in reached_ids))
+    return milestones
+
+
+def build_goal_summary(response: BroadcastResponse, replay_offset_sec: float) -> GoalSequenceSummary | None:
+    """Consolidated facts appear only when the goal timestamp has been reached."""
+    frame = filter_synchronized_overlays(response, replay_offset_sec)
+    start = min(event.timestamp_sec for event in response.episode.events)
+    if start + frame.replay_offset_sec < response.episode.timestamp_goal:
+        return None
+    shooters = [item.event.player_name for item in frame.events
+                if item.event.event_type == 'SHOT' and item.event.is_successful
+                and item.event.team == response.episode.scoring_team
+                and item.event.timestamp_sec == response.episode.timestamp_goal]
+    return GoalSequenceSummary(frame.duration, response.broadcast_metrics.pass_accuracy,
+                               response.analysis.sequence_packing_score,
+                               shooters[0] if len(shooters) == 1 else None)
+
+
 def build_pitch_figure(
     broadcast_response: BroadcastResponse, replay_offset_sec: float | None = None,
 ) -> go.Figure:
@@ -88,8 +142,10 @@ def build_pitch_figure(
         x=[d.x for d in defenders], y=[d.y for d in defenders], mode='markers',
         name='Defensive snapshot', marker=dict(size=12, symbol='x',
         color=['#E58F94' if value else '#7A8496' for value in eliminated]),
-        text=['Bypassed in static snapshot' if value else 'Static defender' for value in eliminated],
-        hovertemplate='%{text}<br>X %{x:.1f} / Y %{y:.1f}<extra></extra>',
+        text=[escape(d.player_id) for d in defenders],
+        customdata=[['Bypassed in key pass' if value else 'Active in key-pass comparison' if visible_key
+                     else 'Snapshot / key pass not reached'] for value in eliminated],
+        hovertemplate='<b>%{text}</b><br>%{customdata[0]}<br>X %{x:.1f} / Y %{y:.1f} pitch_units<extra></extra>',
         meta={'kind': 'defenders', 'bypassed': eliminated},
     ))
     for item in frame.events:
@@ -105,16 +161,26 @@ def build_pitch_figure(
             marker=dict(size=[13 if focus else 8, 7], color=color,
                         symbol=['circle-open' if focus else 'circle', 'diamond']),
             opacity=1.0 if item.is_active or key or focus else .5,
-            text=[f'{event.player_name} / {event.event_type.lower()} / +{item.relative_sec:.1f}s'] * 2,
-            hovertemplate='%{text}<br>X %{x:.1f} / Y %{y:.1f}<extra></extra>',
+            text=[f'<b>{escape(event.player_name)}</b><br>{escape(event.event_type.replace("_", " ").capitalize())}'
+                  f' / +{item.relative_sec:.1f}s'] * 2,
+            customdata=[['Origin'], ['Destination' if event.end_x is not None and event.end_y is not None
+                                    else 'Destination unavailable; marker stays at known coordinates']],
+            hovertemplate='%{text}<br>%{customdata[0]}<br>X %{x:.1f} / Y %{y:.1f} pitch_units<extra></extra>',
             meta={'event_id': event.event_id, 'is_key_pass': key, 'is_focus': focus, 'is_active': item.is_active},
         ))
         if key:
             figure.add_annotation(x=event.start_x, y=event.start_y, text='Key pass',
                                   showarrow=False, yshift=24, font=dict(color=AMBER, size=11))
+    # Paper-space legend preserves trace contracts and does not add fabricated pitch data.
+    for x, label, color in [
+        (0.0, '● Key pass', AMBER), (.26, '◎ Focused player', BLUE),
+        (.53, '✕ Bypassed defender', '#E58F94'), (.81, '✕ Active defender', '#A6B0C3'),
+    ]:
+        figure.add_annotation(x=x, y=1.09, xref='paper', yref='paper', text=label,
+                              xanchor='left', showarrow=False, font=dict(size=11, color=color))
     figure.update_layout(
-        paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, family='Arial, sans-serif'),
-        margin=dict(l=14, r=14, t=12, b=22), height=480, showlegend=False,
+        paper_bgcolor=PANEL, plot_bgcolor=PANEL, font=dict(color=TEXT, family=SYSTEM_FONT),
+        margin=dict(l=14, r=26, t=60, b=36), height=480, showlegend=False,
         xaxis=dict(range=[0, 100], showgrid=False, zeroline=False, title='Normalized pitch / attack direction →',
                    tickvals=[0, 33.3, 66.6, 100], fixedrange=True),
         yaxis=dict(range=[0, 100], showgrid=False, zeroline=False, showticklabels=False, fixedrange=True),

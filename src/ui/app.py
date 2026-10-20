@@ -5,42 +5,128 @@ import os
 import streamlit as st
 
 from src.ui.service import DEMO_MODES, StudioService, StudioServiceError
-from src.ui.visualization import build_pitch_figure, filter_synchronized_overlays
+from src.ui.visualization import (
+    build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
+)
 
 CSS = """
 <style>
-:root { color-scheme:dark; }
-.stApp { background:#090A0F; color:#E8ECF4; font-family:Arial,sans-serif; }
-#MainMenu, footer, [data-testid="stToolbar"] {display:none;}
-[data-testid="stHeader"] {background:transparent;height:0;}
-[data-testid="stSidebarCollapsedControl"] {visibility:visible;background:#11131A;}
-[data-testid="stMainBlockContainer"] {padding-top:1.8rem; max-width:1600px;}
+:root { color-scheme:dark; --space-8:8px; --space-12:12px; --space-16:16px; --space-24:24px; --studio-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", sans-serif; }
+input, button, select, textarea, [data-baseweb="select"], [data-baseweb="popover"] {font-family:var(--studio-font) !important;}
+.stApp { background:#090A0F; color:#E8ECF4; font-family:var(--studio-font); }
+[data-testid="stHeaderActionElements"] {display:none !important;}
+#MainMenu, footer, [data-testid="stAppDeployButton"] {display:none;}
+[data-testid="stHeader"], [data-testid="stSidebar"], [data-testid="collapsedControl"],
+[data-testid="stExpandSidebarButton"] {display:none !important;}
+.block-container {padding-top:1rem !important;}
+[data-testid="stMainBlockContainer"] {max-width:1600px;container-type:inline-size;}
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] {gap:var(--space-16);}
+.st-key-studio_header {margin:0 0 8px;gap:16px;align-items:center;}
+.studio-bar h1 {padding:0 !important;line-height:1.25 !important;}
+.st-key-studio_header [data-testid="stMarkdownContainer"] p {margin:0;}
+.st-key-studio_header [data-testid="stPopover"] button {min-height:44px;margin:0;}
+.st-key-studio_header > * {min-width:0;}
+.st-key-replay_controls {padding:0;margin:0;}
+.st-key-replay_controls > * {width:100% !important;min-width:0;}
+.st-key-replay_controls [data-testid="stButton"], .st-key-replay_controls button {width:100%;height:100%;box-sizing:border-box;}
+.st-key-replay_controls button {min-height:72px;padding:12px;line-height:1.4;}
+.simulation-pill {display:inline-block;color:#E8B86D;border:1px solid #886C3F;
+ border-radius:999px;padding:4px var(--space-8);font-size:.7rem;white-space:normal;}
+.header-title {display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.focus-note {margin-top:8px;padding-top:8px;border-top:1px solid #1E2230;line-height:1.4;}
+.st-key-pitch_note {margin:var(--space-8) 0 var(--space-12);}
+.st-key-pitch_note p {margin:0;line-height:1.5;}
+.studio-bar .badge {white-space:normal;}
+
 [data-testid="stSidebar"] {background:#0D0F15; border-right:1px solid #1E2230;}
 [data-testid="stSidebar"] * {color:#E8ECF4;}
 [data-testid="stSidebar"] input {color:#E8ECF4;background:#11131A;}
-h1,h2,h3 {font-family:Arial,sans-serif !important; letter-spacing:-.035em; color:#E8ECF4;}
-h1 {font-size:2rem !important; font-weight:600 !important; margin:0 !important;}
+h1,h2,h3 {font-family:var(--studio-font) !important; letter-spacing:-.035em; color:#E8ECF4;}
+h1 {font-size:1.6rem !important; font-weight:600 !important; margin:0 !important;}
 h2 {font-size:1.12rem !important; font-weight:500 !important;}
 p {line-height:1.55; max-width:76ch;}
-.studio-bar {display:flex; justify-content:space-between; align-items:center; gap:1rem; margin-bottom:1.4rem;}
+.studio-bar {min-height:44px;display:flex; justify-content:space-between; align-items:center; gap:.75rem; margin-bottom:0;}
 .subtle {color:#A6B0C3;font-size:.84rem;}
-.badge {font:11px ui-monospace,Menlo,monospace; color:#B8C9E6; white-space:nowrap;}
+.badge {font:11px var(--studio-font); color:#B8C9E6; font-variant-numeric:tabular-nums;white-space:nowrap;}
 .dot {display:inline-block;width:6px;height:6px;background:#76ADFF;border-radius:50%;margin-right:8px;}
 .dot.warn {background:#E8B86D;}
-.bento {background:#11131A;border:1px solid #1E2230;border-radius:8px;padding:18px;
- font-variant-numeric:tabular-nums;margin-bottom:12px;}
+.bento p {margin:var(--space-12) 0 0;}
+.bento h2 {margin:0 0 var(--space-12);padding:0;}
+.bento {background:#11131A;border:1px solid #1E2230;border-radius:8px;padding:18px 20px;
+ font-variant-numeric:tabular-nums;margin-bottom:var(--space-12);}
 .metrics {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#1E2230;
- border:1px solid #1E2230;border-radius:8px;overflow:hidden;margin:0 0 20px;}
-.metric {background:#11131A;padding:16px 13px;min-height:90px;}
-.metric .value {font-size:1.12rem;font-weight:600;margin-top:9px;overflow-wrap:anywhere;}
+ border:1px solid #1E2230;border-radius:8px;overflow:hidden;margin:0 0 8px;}
+.metric {min-width:0;overflow:hidden;background:#11131A;padding:var(--space-12) var(--space-16);min-height:0;}
+.metric .value {font-size:1rem;font-weight:600;margin-top:3px;line-height:1.25;overflow-wrap:anywhere;}
 .caption {font-size:.74rem;color:#A6B0C3;}
 .section-line {display:flex;justify-content:space-between;align-items:center;margin:14px 0 8px;}
 .overlay {border-left:2px solid #76ADFF;}
 .overlay.history {border-left-color:#394256;opacity:.65;}
 .overlay.focus {border-left-color:#E8B86D;}
-.overlay-row {display:flex;justify-content:space-between;gap:12px;}
-.overlay-value {font:18px ui-monospace,Menlo,monospace;color:#E8ECF4;}
-.commentary {font-size:1.05rem;line-height:1.65;}
+.overlay-row {display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:var(--space-8) var(--space-12);line-height:1.5;}
+.metric-overlay {padding:14px 18px;}
+.metric-overlay .caption {margin-top:var(--space-8);line-height:1.6;}
+.overlay-value {font:18px var(--studio-font);color:#E8ECF4;}
+.commentary {font-size:1.15rem;line-height:1.7;}
+.narrative-headline {font-size:1.6rem !important;line-height:1.2;}
+.engine-facts .badge {white-space:normal;line-height:1.7;}
+.engine-facts {background:#151D2A;border-left:3px solid #76ADFF;}
+.summary-card {border-left:3px solid #E8B86D;}
+.summary-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-12) var(--space-16);margin-top:var(--space-16);}
+.pipeline {display:flex;align-items:stretch;gap:var(--space-8);flex-wrap:wrap;margin:0 0 var(--space-12);}
+.agent-stage {flex:1;background:#11131A;border:1px solid #394256;border-radius:8px;padding:var(--space-12);font-size:.8rem;line-height:1.5;min-width:0;overflow-wrap:anywhere;}
+.agent-stage strong {display:block;margin-bottom:var(--space-8);}
+.agent-state {font:11px var(--studio-font);color:#B8C9E6;}
+.retry-loop {color:#E8B86D;border:1px solid #E8B86D;border-radius:8px;padding:var(--space-12);margin:0 0 var(--space-12);}
+.critic-box {background:#211B14;border:1px solid #886C3F;border-left:3px solid #E8B86D;border-radius:8px;padding:var(--space-16);margin:0 0 var(--space-12);}
+.critic-box pre {font-family:var(--studio-font);font-size:.75rem;white-space:pre-wrap;overflow-wrap:anywhere;}
+.pipeline-arrow {align-self:center;color:#A6B0C3;}
+.st-key-replay_controls button {white-space:normal;text-align:left;}
+.st-key-replay_controls button p {white-space:normal !important;overflow:visible !important;text-overflow:clip !important;line-height:1.4;}
+.st-key-replay_controls [data-testid="stButton"] {min-width:0;}
+@container (max-width:1100px) {
+ .studio-bar {flex-wrap:wrap;}
+}
+@container (max-width:600px) {
+ .metrics {grid-template-columns:repeat(2,minmax(0,1fr));}
+ .studio-bar {align-items:flex-start;flex-direction:column;gap:8px;}
+}
+@media(max-width:600px) {
+ .st-key-studio_header {flex-wrap:wrap;}
+ .studio-bar {flex-wrap:wrap;gap:8px;}
+ .metric .value {font-size:.95rem;}
+ .pipeline-arrow {display:none;}
+ .agent-stage {min-width:0;overflow-wrap:anywhere;}
+}
+
+.editorial-badges {display:flex;flex-wrap:wrap;gap:var(--space-8);margin:var(--space-12) 0 var(--space-16);}
+.fact-strip {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-16);margin:var(--space-12) 0 0;}
+.fact-chip strong {display:block;margin-top:var(--space-8);font-weight:500;line-height:1.5;}
+.editorial-pill {border:1px solid #394256;border-radius:999px;padding:4px var(--space-8);font-size:.74rem;color:#B8C9E6;}
+.verified-grounds {border-top:1px solid #1E2230;padding-top:var(--space-16);margin-top:var(--space-24);}
+.fact-chip {font-size:.78rem;color:#B9C4D6;overflow-wrap:anywhere;}
+.sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;}
+.st-key-studio_controls {padding:0 0 8px;background:transparent;}
+.st-key-play_navigation {border-top:1px solid #1E2230;padding-top:12px;margin-top:4px;}
+.section-heading {margin:var(--space-24) 0 10px !important;padding:0 !important;line-height:1.5;}
+/* Native gaps own telemetry spacing; nested cards do not add a second margin. */
+.st-key-telemetry {gap:0 !important;}
+.st-key-telemetry [data-testid="stMarkdownContainer"] {display:flow-root;}
+.telemetry-stack {display:flex !important;flex-direction:column !important;gap:14px !important;margin-bottom:14px !important;}
+.telemetry-stack > * {margin:0 !important;}
+.st-key-telemetry .bento, .st-key-telemetry .pipeline,
+.st-key-telemetry .retry-loop, .st-key-telemetry .critic-box {margin:0;}
+.st-key-telemetry button {min-height:44px;padding:var(--space-8) var(--space-16);}
+.st-key-regenerate_narrative {margin-top:14px !important;margin-bottom:12px !important;}
+.bento, .bento *, .metrics, .metric, .pipeline, .agent-stage, .retry-loop, .critic-box,
+.studio-bar, .editorial-badges, .editorial-pill, .verified-grounds, .fact-strip, .fact-chip,
+.summary-grid, .overlay-row, .trace {box-sizing:border-box;}
+.bento, .fact-chip, .summary-grid > *, .editorial-badges > * {min-width:0;overflow-wrap:anywhere;}
+@media(max-width:400px) {
+ .fact-strip, .summary-grid {grid-template-columns:minmax(0,1fr);}
+ .pipeline {flex-direction:column;}
+ .pipeline-arrow {display:none;}
+}
 .breakdown {color:#B9C4D6;font-size:.88rem;line-height:1.65;}
 .trace {border-left:1px solid #394256;padding-left:12px;margin:12px 0;font-size:.8rem;}
 button:focus-visible, input:focus-visible, [role="combobox"]:focus-visible {outline:2px solid #76ADFF !important;outline-offset:3px;}
@@ -74,25 +160,68 @@ def seek_replay(offset: float) -> None:
     st.session_state['replay_clock'] = offset
 
 
+def regenerate_narrative() -> None:
+    """Invalidate the cached narrative before the next script run."""
+    st.session_state.pop('_result_key', None)
+
+
 def render_overlay(item) -> None:
     overlay = item.overlay
-    classes = 'overlay' + (' focus' if overlay.is_focus else '') + ('' if item.is_active else ' history')
     html_card(
         f'<div class="overlay-row"><span>{escape(overlay.label)}</span>'
         f'<span class="overlay-value">{overlay.value:.1f} <small>{escape(overlay.unit)}</small></span></div>'
         f'<div class="caption">{escape(overlay.player_name)} / +{item.relative_sec:.1f}s / '
-        f'{"On screen now" if item.is_active else "Earlier in this replay"}</div>', classes,
+        f'{"On screen now" if item.is_active else "Earlier in this replay"}</div>',
+        'metric-overlay overlay' + (' history' if not item.is_active else '') + (' focus' if overlay.is_focus else ''),
     )
 
 
+def render_pipeline(telemetry, summary_html: str) -> None:
+    """Show completed execution evidence, not a simulated live processing animation."""
+    recovered = telemetry.status == 'RECOVERED'
+    fallback = telemetry.status == 'DEGRADED_FALLBACK'
+    labels = [
+        ('1. Tactical Analyst', 'Facts ready'),
+        ('2. Persona Narrator', 'Drafts rejected' if fallback else 'Repaired' if recovered else 'Draft accepted'),
+        ('3. Guardrail Critic', 'Fallback validated' if fallback else 'Accepted'),
+    ]
+    stages = '<span class="pipeline-arrow" aria-hidden="true">→</span>'.join(
+        f'<div class="agent-stage"><strong>{label}</strong><span class="agent-state">{state}</span></div>'
+        for label, state in labels
+    )
+    blocks = [f'<div class="pipeline" aria-label="Completed agent execution">{stages}</div>', summary_html]
+    has_return = any(h.from_agent == 'GuardrailCriticAgent' and h.to_agent == 'PersonaNarratorAgent'
+                     for h in telemetry.handoffs)
+    if has_return:
+        blocks.append('<div class="retry-loop">↩ Critic → Narrator / repair requested / '
+                      'second generation attempt completed</div>')
+    if telemetry.critic_feedback:
+        for number, feedback in enumerate(telemetry.critic_feedback, 1):
+            blocks.append(f'<div class="critic-box" role="status"><strong>Draft {number} rejected by the critic</strong>'
+                        '<p>The draft failed a grounding or output rule. '
+                        'The reason below was recorded before requesting a repair or producing the safe fallback.</p>'
+                        f'<pre>{escape(feedback)}</pre></div>')
+    st.markdown('<div class="telemetry-stack" style="display:flex;flex-direction:column;gap:14px;margin-bottom:14px;">'
+                + ''.join(blocks) + '</div>', unsafe_allow_html=True)
+
+
 def main() -> None:
-    st.set_page_config(page_title='Touchline / Broadcast Studio', layout='wide', initial_sidebar_state='expanded')
+    st.set_page_config(page_title='Touchline / Broadcast Studio', layout='wide', initial_sidebar_state='collapsed')
     st.markdown(CSS, unsafe_allow_html=True)
     service = StudioService(os.getenv('API_BASE_URL') or None)
     source = 'Remote API' if service.api_base_url else 'Local / offline'
-    with st.sidebar:
-        st.markdown('## Touchline')
-        st.caption('Broadcast studio / synthetic replay')
+    with st.container(key='studio_header'):
+        title_column, help_column = st.columns([6, 1], vertical_alignment='center')
+        title_column.markdown('<div class="studio-bar"><h1>Broadcast studio</h1></div>', unsafe_allow_html=True)
+        with help_column.container(horizontal_alignment='right'):
+            with st.popover('Help'):
+                st.markdown('Choose a play and commentary voice in the control bar. Select a **Key Events** milestone '
+                            'to inspect that moment; the final milestone shows the full play. '
+                            'Episode metrics stay fixed while the pitch and overlays follow your selection. '
+                            'Use **Agent behavior** to demonstrate a clean run, critic recovery or safe fallback.')
+                st.caption(source + ' / Fictional players and events. Normalized coordinates; static defensive snapshot.')
+    with st.container(key='studio_controls'):
+        controls = st.columns(5, vertical_alignment='bottom', gap='small')
         try:
             ids = service.list_goal_ids()
         except StudioServiceError as error:
@@ -101,9 +230,9 @@ def main() -> None:
         if not ids:
             html_card('No episodes loaded. Load synthetic episodes in the backend and refresh.')
             return
-        goal_id = st.selectbox('Choose a play', ids, key='episode', format_func=lambda value: EPISODE_LABELS.get(value, value))
-        persona = st.selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get, help='Changes the voice of the commentary; tactical facts stay the same.')
-        language = st.selectbox('Commentary language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
+        goal_id = controls[0].selectbox('Play', ids, key='episode', format_func=lambda value: EPISODE_LABELS.get(value, value))
+        persona = controls[1].selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get)
+        language = controls[2].selectbox('Language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
         episode_key = (service.api_base_url, goal_id)
         try:
             if st.session_state.get('_episode_key') != episode_key:
@@ -116,17 +245,18 @@ def main() -> None:
             html_card(escape(str(error)))
             return
         players = {event.player_id: event.player_name for event in episode.events}
-        focus_id = st.selectbox('Focus player', [None, *players, 'P_99'], key='focus',
-                                format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'), help='Highlight a player on the pitch and mention their recorded involvement.')
-        with st.expander('Recovery demo / advanced'):
-            st.caption('Deliberately reject a draft to watch the critic request a repair or produce a safe fallback.')
-            mode = st.selectbox('Agent demo mode', DEMO_MODES, key='demo_mode')
-        st.caption(source)
-        st.caption('Normalized pitch coordinates. Static defensive snapshot. Fictional players and events.')
-        regenerate = st.button('Regenerate narrative', width='stretch')
+        focus_id = controls[3].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
+                                format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
+        behavior_labels = dict(zip(DEMO_MODES, [
+            'Clean run (first-pass success)',
+            'Single mistake (critic recovers)',
+            'Repeated mistake (safe fallback)',
+        ]))
+        mode = controls[4].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
+                                     format_func=behavior_labels.get)
     key = (episode_key, persona, language, focus_id, mode)
     try:
-        if regenerate or st.session_state.get('_result_key') != key:
+        if st.session_state.get('_result_key') != key:
             st.session_state['_broadcast'] = service.broadcast(
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
             )
@@ -139,19 +269,6 @@ def main() -> None:
     telemetry = result.telemetry
     status = telemetry.status
     simulated = mode != 'Normal'
-    st.markdown(
-        '<div class="studio-bar"><div><h1>Broadcast studio</h1>'
-        '<div class="subtle">A goal sequence, with the evidence in view.</div></div>'
-        f'<div class="badge"><span class="dot"></span>[LIVE REPLAY] &nbsp; '
-        f'<span class="dot {"warn" if status != "SUCCESS" else ""}"></span>[CRITIC: {escape(status)}]</div></div>',
-        unsafe_allow_html=True,
-    )
-    html_card('<strong>New here?</strong> The full play is shown first. '
-              'Choose a play in the left panel, then select <strong>View key pass</strong> '
-              'to see the main breakthrough. Use <strong>Start replay</strong> and '
-              '<strong>Next event</strong> to inspect it step by step.')
-    if simulated:
-        html_card('Local failure simulation / ' + escape(mode), 'overlay focus')
     analysis, metrics = result.analysis, result.broadcast_metrics
     pivot = next((event.player_name for event in episode.events if event.player_id == analysis.tactical_pivot), 'Unavailable')
     values = [
@@ -164,74 +281,88 @@ def main() -> None:
     st.markdown('<div class="metrics">' + ''.join(
         f'<div class="metric"><div class="caption">{escape(label)}</div><div class="value">{escape(value)}</div></div>'
         for label, value in values) + '</div>', unsafe_allow_html=True)
-    st.caption('Full-episode analysis / the replay clock controls event and overlay visibility.')
     duration = episode.timestamp_goal - min(event.timestamp_sec for event in episode.events)
     st.session_state.setdefault('replay_clock', float(duration))
     current = float(st.session_state['replay_clock'])
-    first_time = min(event.timestamp_sec for event in episode.events)
-    event_offsets = sorted({event.timestamp_sec - first_time for event in episode.events})
-    next_offset = next((offset for offset in event_offsets if offset > current + 1e-9), duration)
-    key_event = next((event for event in episode.events if event.event_id == metrics.key_pass_event_id), None)
-    restart, advance, key_control, full = st.columns(4)
-    restart.button('Start replay', key='restart_replay', on_click=seek_replay, args=(0.0,), width='stretch')
-    advance.button('Next event', key='next_event', on_click=seek_replay,
-                   args=(next_offset,), disabled=current >= duration, width='stretch')
-    key_control.button('View key pass', key='key_pass', type='primary', on_click=seek_replay,
-                       args=(key_event.timestamp_sec-first_time if key_event else 0.0,),
-                       disabled=key_event is None, width='stretch')
-    full.button('Show full play', key='full_play', on_click=seek_replay, args=(float(duration),), width='stretch')
-    if duration > 0:
-        clock = st.slider('Replay clock (seconds)', 0.0, float(duration), step=0.1,
-                          format='%.1fs', key='replay_clock')
-    else:
-        clock = 0.0
-        st.caption('Single instant / 0.0s')
+    timeline = build_event_timeline(result, current)
+    with st.container(key='play_navigation', gap='small'):
+        st.markdown('<h2 class="section-heading">Key Events</h2>', unsafe_allow_html=True)
+        with st.container(key='replay_controls'):
+            columns = st.columns(len(timeline), gap='small')
+            for number, (column, milestone) in enumerate(zip(columns, timeline), 1):
+                label = milestone.label
+                if number == len(timeline):
+                    label += ' / Full play'
+                with column:
+                    st.button(f'{number}. +{milestone.relative_sec:.1f}s · {label}  \n'
+                              f'{milestone.player_name}{" · Current" if milestone.is_current else ""}',
+                              key=f'milestone_{milestone.event_id}',
+                              type='primary' if milestone.is_current else 'secondary',
+                              on_click=seek_replay, args=(milestone.relative_sec,), width='stretch', wrap=True)
+    clock = current
     frame = filter_synchronized_overlays(result, clock)
-    left, right = st.columns([1.65, 1], gap='large')
+    left, right = st.columns([1.65, 1], gap='medium')
     with left:
-        st.markdown('## Explore the play')
-        active = [item.event for item in frame.events if item.is_active]
-        event_text = '; '.join(f'{event.player_name}: {event.event_type.lower()}' for event in active)
-        html_card(f'<div class="caption">Selected moment / +{clock:.1f}s of {duration:.1f}s</div>'
-                  f'<strong>{escape(event_text)}</strong>')
-        st.plotly_chart(build_pitch_figure(result, clock), width='stretch',
+        st.markdown('<h2 class="section-heading">Explore the play</h2>', unsafe_allow_html=True)
+        figure = build_pitch_figure(result, clock)
+        figure.update_layout(height=420)
+        st.plotly_chart(figure, width='stretch',
                         config={'displayModeBar': False}, theme=None, key='pitch')
-        st.caption('Amber: key pass. Blue ring: focused player. Rose crosses: defenders bypassed in the static snapshot.')
-        st.markdown('## On-screen facts at this moment')
+        with st.container(key='pitch_note'):
+            st.caption('Defenders are a static snapshot; active/bypassed refers only to the key-pass comparison.')
+        st.markdown('<h2 class="section-heading">On-screen facts at this moment</h2>', unsafe_allow_html=True)
         active_overlays = [item for item in frame.timed_overlays if item.is_active]
         history = [item for item in frame.timed_overlays if not item.is_active]
-        if not active_overlays:
-            html_card('No metric is triggered at this event. Select View key pass to see the pass overlays.', 'overlay history')
+        summary = build_goal_summary(result, clock)
+        if summary is not None:
+            accuracy = f'{100 * summary.pass_accuracy:.0f}%' if summary.pass_accuracy is not None else 'Unavailable'
+            html_card('<h2>Goal Sequence Summary</h2><div class="caption">Consolidated episode facts / goal reached</div>'
+                      '<div class="summary-grid">'
+                      f'<div><span class="caption">Sequence duration</span><br><strong>{summary.duration_sec:.1f}s</strong></div>'
+                      f'<div><span class="caption">Accumulated pass accuracy</span><br><strong>{accuracy}</strong></div>'
+                      f'<div><span class="caption">Maximum packing</span><br><strong>{summary.maximum_packing}</strong></div>'
+                      f'<div><span class="caption">Final shooter</span><br><strong>{escape(summary.final_shooter or "Unavailable")}</strong></div>'
+                      '</div>', 'summary-card')
+        if not active_overlays and summary is None:
+            html_card('No metric is triggered at this event. Select the Key pass milestone to see the pass overlays.', 'overlay history')
         for item in active_overlays:
             render_overlay(item)
         if history:
-            with st.expander(f'Earlier overlays ({len(history)})'):
+            with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
                 for item in reversed(history):
                     render_overlay(item)
     with right:
-        st.markdown('## Why this goal happened')
-        html_card(f'<h2>{escape(result.narrative.headline)}</h2>'
-                  f'<p class="commentary">{escape(result.narrative.commentary)}</p>'
-                  f'<p class="breakdown">{escape(result.narrative.tactical_breakdown)}</p>')
+        st.markdown('<h2 class="section-heading">Why this goal happened</h2>', unsafe_allow_html=True)
         focus = result.focus
-        focus_text = ('No player focus selected.' if focus.player_id is None else
-                      f'{focus.player_name} / {len(focus.event_ids)} recorded interventions.' if focus.participated else
-                      'Selected player is absent from this sequence. No involvement is attributed.')
-        html_card('<div class="caption">Player focus</div><p>' + escape(focus_text) + '</p>')
-        st.markdown('## Multi-agent telemetry')
-        html_card(f'<div class="badge">[CRITIC: {escape(status)}]</div>'
-                  f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
-                  f'<div class="caption">Orchestration latency: {telemetry.latency_ms:.2f} ms / '
-                  f'{"Local simulation" if simulated else escape(source)}</div>')
-        with st.expander('Inspect agent handoffs', expanded=simulated):
-            for handoff in telemetry.handoffs:
-                html_card(f'<div class="caption">Attempt {handoff.attempt}</div>'
-                          f'<div>{escape(handoff.from_agent)} → {escape(handoff.to_agent)}</div>'
-                          f'<p class="caption">{escape(handoff.reason)}</p>')
-        if telemetry.critic_feedback:
-            with st.expander('Critic feedback', expanded=simulated):
-                for feedback in telemetry.critic_feedback:
-                    st.text(feedback)
+        focus_text = ('Whole team' if focus.player_id is None else
+                      f'{focus.player_name} · {len(focus.event_ids)} actions' if focus.participated else
+                      'External player · absent')
+        grounds = [('Packing', str(analysis.sequence_packing_score)), ('Tactical pivot', pivot),
+                   ('Breakdown zone', analysis.breakdown_zone or 'Unavailable'), ('Tactical cause', analysis.tactical_cause)]
+        chips = ''.join(f'<div class="fact-chip"><span class="caption">{label}</span><strong>{escape(value)}</strong></div>'
+                        for label, value in grounds)
+        html_card(f'<h2 class="narrative-headline">{escape(result.narrative.headline)}</h2>'
+                  '<div class="editorial-badges">'
+                  f'<span class="editorial-pill">{escape(PERSONA_LABELS[persona])} · {language.upper()}</span>'
+                  f'<span class="editorial-pill">Focus: {escape(focus_text)}</span></div>'
+                  f'<p class="commentary">{escape(result.narrative.commentary)}</p>'
+                  '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
+                  f'<div class="fact-strip">{chips}</div>'
+                  f'<span class="sr-only">{escape(result.narrative.tactical_breakdown)}</span></div>', 'editorial-card')
+        st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
+        outcome = {'SUCCESS': 'Accepted', 'RECOVERED': 'Recovered after retry',
+                   'DEGRADED_FALLBACK': 'Safe fallback'}[status]
+        with st.container(key='telemetry'):
+            render_pipeline(telemetry, f'<div class="bento"><strong>{outcome}</strong>'
+                      f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
+                      f'<div class="caption">Orchestration latency: {telemetry.latency_ms:.2f} ms / '
+                      f'{"Local simulation" if simulated else escape(source)}</div></div>')
+            st.button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative)
+            with st.expander('Inspect agent handoffs', expanded=simulated):
+                for handoff in telemetry.handoffs:
+                    html_card(f'<div class="caption">Attempt {handoff.attempt}</div>'
+                              f'<div>{escape(handoff.from_agent)} → {escape(handoff.to_agent)}</div>'
+                              f'<p class="caption">{escape(handoff.reason)}</p>')
 
 
 if __name__ == '__main__':

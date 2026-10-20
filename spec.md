@@ -315,8 +315,9 @@ six compact full-episode metrics above. Controls remain in the sidebar; Streamli
 columns stack on narrow screens. Color tokens: canvas #090A0F, panel #11131A,
 border #1E2230, text #E8ECF4, event/focus blue #76ADFF, key-pass amber #E8B86D.
 Defenders bypassed in the static snapshot use rose; neutral defenders stay gray.
-Cards have 8px corners and tabular numerals. Arial/system sans carries prose;
-local monospace carries technical badges and numerical overlays. No fonts or
+Cards have 8px corners and tabular numerals. The Apple system font stack (San Francisco on supported Apple platforms)
+carries prose, controls, technical badges and numerical overlays, with system
+fallbacks elsewhere and tabular numerals for metrics. No fonts or
 assets are fetched from external services. No emojis, gradients or decorative
 animation. Default app chrome is hidden while sidebar reopening remains available.
 Keyboard focus is visible and reduced-motion preferences are respected.
@@ -363,7 +364,7 @@ core latency measurements must not be presented as Streamlit startup timings.
 ### Guided studio UX refinement
 
 The initial replay clock now shows the full episode, making the play visible on
-first entry. View key pass is the primary action; Start replay resets to zero,
+first entry. The Key pass timeline milestone is the direct access to the breakthrough; Start replay resets to zero,
 Next event advances to the next strictly later event timestamp, and Show full
 play seeks to the goal. Buttons update session state through callbacks before
 the slider is rendered and reuse the same narrative. Empty-duration episodes
@@ -376,3 +377,32 @@ historical overlays and handoff details are collapsed until requested, while
 status/attempts/latency remain visible. Failure injection is grouped under
 Recovery demo / advanced. Native dark widget theming comes from
 `.streamlit/config.toml`; the established broadcast palette/cards remain.
+
+### Consolidated replay navigation
+
+Timeline milestones now provide the single per-event jump control. Next event
+and overlay Go to buttons have been removed to avoid redundant seeking actions.
+Transport retains Start replay and Show full play; the slider is
+still available. Overlay times are absolute positions within the relative replay,
+not increments or playback-speed multipliers. Streamlit's native sidebar expand
+button remains in the visible header and is labelled Show controls; the toolbar
+must not be hidden because it contains this button in the installed version.
+
+
+### Compact broadcast workspace
+
+The header now groups the title, status and single-line simulation indicator;
+Quick guide uses an on-demand native popover. Expanded-sidebar desktop mode
+uses 1rem top padding; collapsed-sidebar mode reserves space for the native
+Show controls button. Metrics use 8px/12px padding. One horizontal, wrapping
+control strip contains Start replay, timeline milestones and Full play, with
+no duplicate key-pass action or intermediate instructional rows. The slider
+remains below. Selected moment uses a compact card, and the chart renders at
+420px in the studio while the pure plotting helper keeps its default height.
+Responsive wrapping and mobile column stacking preserve control access; actual
+above-the-fold coverage varies with viewport, zoom and narrative length.
+
+Tests explicitly close the mocked HTTPError and AppTest's module-owned temporary
+directory. The known bare-thread AppTest initialization diagnostic is captured
+and asserted specifically; application logging is not disabled. The complete
+suite can run with Python warnings treated as errors.

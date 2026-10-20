@@ -145,6 +145,9 @@ class BroadcastTests(unittest.TestCase):
         self.assertFalse(second.focus.participated)
         self.assertEqual(second.telemetry.attempts, 1)
         self.assertIn('Nolan Vale', first.narrative.commentary)
+        self.assertEqual(first.narrative.commentary, second.narrative.commentary,
+                         'An already-described focus player must not receive a redundant suffix')
+        self.assertNotIn('also features in the recorded sequence', first.narrative.commentary)
         self.assertNotIn('Featured involvement', second.narrative.commentary)
 
 
