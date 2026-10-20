@@ -289,3 +289,90 @@ is not an Azure latency estimate. Refusals and validation errors are recoverable
 unhandled API/network failures still propagate, without silent offline fallback.
 The critic implements specified syntactic/name checks, not universal semantic
 truth verification of free-form narrative.
+
+## Broadcast Studio UI (Step 5)
+
+### Files and runtime
+
+- `src/ui/app.py`: Streamlit control room, escaped HTML metric/narrative cards,
+  Plotly pitch, relative replay slider and full multi-agent telemetry.
+- `src/ui/visualization.py`: pure typed replay-frame filtering and figure builder.
+- `src/ui/service.py`: local DuckDB/orchestrator access, optional HTTP transport,
+  explicit local failure simulation and grounded remote-response validation.
+- `tests/test_ui.py`: offline geometry/service tests and Streamlit AppTest.
+
+Launch with `uv run streamlit run src/ui/app.py` from the project root. Local
+mode requires neither API startup nor Azure credentials and seeds fictional
+scenarios in memory. API_BASE_URL enables remote discovery/intelligence/broadcast;
+local simulation modes still use local client injection on the selected episode.
+Remote narrative JSON is validated again with reconstructed grounding context,
+since private Pydantic attributes are not serialized over HTTP.
+
+### Visual design
+
+The pitch is the primary working surface, with commentary/audit to its right and
+six compact full-episode metrics above. Controls remain in the sidebar; Streamlit
+columns stack on narrow screens. Color tokens: canvas #090A0F, panel #11131A,
+border #1E2230, text #E8ECF4, event/focus blue #76ADFF, key-pass amber #E8B86D.
+Defenders bypassed in the static snapshot use rose; neutral defenders stay gray.
+Cards have 8px corners and tabular numerals. Arial/system sans carries prose;
+local monospace carries technical badges and numerical overlays. No fonts or
+assets are fetched from external services. No emojis, gradients or decorative
+animation. Default app chrome is hidden while sidebar reopening remains available.
+Keyboard focus is visible and reduced-motion preferences are respected.
+
+### Replay semantics
+
+`filter_synchronized_overlays(response, replay_offset_sec)` returns a ReplayFrame
+with visible ReplayEvent and ReplayOverlay wrappers, relative_sec and is_active.
+The origin is the first chronological event; duration is timestamp_goal minus
+that origin. Finite offsets clamp to [0,duration]; nonfinite inputs raise
+ValueError. Inclusion is <= the absolute cutoff (origin + offset), avoiding
+floating-point subtraction noise at event boundaries. All events sharing the
+latest reached event timestamp are active. Overlays are active only when their
+timestamp equals that event timestamp; historical overlays remain visible but
+muted. A later event without an overlay deactivates earlier overlays. The clock
+is a manual synthetic replay control, not a claim of live video ingestion.
+
+`build_pitch_figure(response, replay_offset_sec=None)` shows all events by default
+or only reached events with a supplied clock offset. Axes are exactly 0–100;
+thirds are 33.3 and 66.6. The key successful pass has an amber stroke; a focused
+player has open markers. Static defenders are shown throughout, but bypassed
+coloring and key-pass annotations activate only after that pass is reached.
+Packing uses the same strict start_x < defender.x < end_x rule. Static snapshot
+positions are never interpolated as if tracking data existed.
+
+### Interaction and state
+
+The controls select episode, persona, en/es language, optional participating or
+absent focus player, and Normal/single-retry/double-failure modes. Each simulated
+run creates a fresh injected client and executes the real critic/retry/fallback
+path. Simulation status is explicitly labelled. Session state retains the
+validated response by source/episode/persona/language/focus/mode: moving the
+clock does not invoke generation. Episode changes reset focus; narrative-control
+changes reset the clock. Regenerate narrative explicitly requests another run.
+Top metrics and commentary are labelled full-episode analysis; synchronized
+pitch/overlays alone represent the currently reached replay time.
+
+HTTP requests have a bounded timeout and actionable error/empty states; discovery
+and episode payloads are validated. Remote episode discovery currently needs an
+intelligence request per selected episode, which can invoke the backend model.
+There is no automatic dotenv loading. UI tests mock HTTP and use offline clients;
+core latency measurements must not be presented as Streamlit startup timings.
+
+### Guided studio UX refinement
+
+The initial replay clock now shows the full episode, making the play visible on
+first entry. View key pass is the primary action; Start replay resets to zero,
+Next event advances to the next strictly later event timestamp, and Show full
+play seeks to the goal. Buttons update session state through callbacks before
+the slider is rendered and reuse the same narrative. Empty-duration episodes
+remain at zero. This supersedes the initial zero-offset UI default.
+
+Friendly episode/commentary/language labels retain canonical IDs internally.
+A brief first-visit walkthrough explains the workflow; the currently reached
+player/action is displayed above the pitch. Active overlays are shown directly;
+historical overlays and handoff details are collapsed until requested, while
+status/attempts/latency remain visible. Failure injection is grouped under
+Recovery demo / advanced. Native dark widget theming comes from
+`.streamlit/config.toml`; the established broadcast palette/cards remain.

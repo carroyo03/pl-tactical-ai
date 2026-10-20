@@ -1,5 +1,37 @@
-.vscode/*
+# Local editor and agent configuration
+.vscode/
+.idea/
+.kiro/
+.claude/
+.agents/
+.codex/
+skills-lock.json
+
+# Python environments and generated files
+.venv/
+venv/
+env/
 *.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local data and secrets
 data/*
 .env
-*__pycache__*
+.env.*
+!.env.example
+
+# Frontend dependencies and build output
+node_modules/
+.next/
+
+# Operating system files
+.DS_Store
+Thumbs.db
