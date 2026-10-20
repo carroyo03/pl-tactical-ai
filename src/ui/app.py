@@ -29,7 +29,10 @@ input, button, select, textarea, [data-baseweb="select"], [data-baseweb="popover
 .st-key-replay_controls {padding:0;margin:0;}
 .st-key-replay_controls > * {width:100% !important;min-width:0;}
 .st-key-replay_controls [data-testid="stButton"], .st-key-replay_controls button {width:100%;height:100%;box-sizing:border-box;}
-.st-key-replay_controls button {min-height:72px;padding:12px;line-height:1.4;}
+.st-key-replay_controls button {height:104px !important;min-height:104px;padding:16px;line-height:1.4;}
+.st-key-replay_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;align-items:stretch;}
+.st-key-replay_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
+.st-key-replay_controls button[kind="primary"] {border:2px solid #B9D4FF;}
 .simulation-pill {display:inline-block;color:#E8B86D;border:1px solid #886C3F;
  border-radius:999px;padding:4px var(--space-8);font-size:.7rem;white-space:normal;}
 .header-title {display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -52,7 +55,7 @@ p {line-height:1.55; max-width:76ch;}
 .dot.warn {background:#E8B86D;}
 .bento p {margin:var(--space-12) 0 0;}
 .bento h2 {margin:0 0 var(--space-12);padding:0;}
-.bento {background:#11131A;border:1px solid #1E2230;border-radius:8px;padding:18px 20px;
+.bento {background:#11131A;border:1px solid #1E2230;border-radius:8px;padding:24px;
  font-variant-numeric:tabular-nums;margin-bottom:var(--space-12);}
 .metrics {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:1px;background:#1E2230;
  border:1px solid #1E2230;border-radius:8px;overflow:hidden;margin:0 0 8px;}
@@ -107,7 +110,7 @@ p {line-height:1.55; max-width:76ch;}
 .fact-chip {font-size:.78rem;color:#B9C4D6;overflow-wrap:anywhere;}
 .sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;}
 .st-key-studio_controls {padding:0 0 8px;background:transparent;}
-.st-key-play_navigation {border-top:1px solid #1E2230;padding-top:12px;margin-top:4px;}
+.st-key-play_navigation {padding:0;margin:0 0 24px;}
 .section-heading {margin:var(--space-24) 0 10px !important;padding:0 !important;line-height:1.5;}
 /* Native gaps own telemetry spacing; nested cards do not add a second margin. */
 .st-key-telemetry {gap:0 !important;}
@@ -117,12 +120,26 @@ p {line-height:1.55; max-width:76ch;}
 .st-key-telemetry .bento, .st-key-telemetry .pipeline,
 .st-key-telemetry .retry-loop, .st-key-telemetry .critic-box {margin:0;}
 .st-key-telemetry button {min-height:44px;padding:var(--space-8) var(--space-16);}
-.st-key-telemetry_domain {margin-top:14px;margin-bottom:12px;}
+.st-key-editorial_domain {padding-top:16px;}
+.st-key-telemetry_domain {padding-top:24px;padding-bottom:16px;}
+.st-key-handoff_panel, .st-key-overlay_history {padding-top:16px;}
+.verified-grounds {padding-bottom:8px;}
+.agent-stage {padding:16px;}
+@container (max-width:1100px) {
+ .st-key-replay_controls [data-testid="stHorizontalBlock"] {grid-template-columns:repeat(2,minmax(0,1fr));}
+}
+@media(max-width:600px) {
+ .bento {padding:20px;}
+ .st-key-replay_controls button {padding:12px;}
+}
+.handoff-list {display:flex !important;flex-direction:column;gap:16px !important;padding:16px;box-sizing:border-box;}
+.handoff-list .handoff-card {margin:0 !important;padding:20px;}
+.handoff-route {margin-top:8px;line-height:1.5;overflow-wrap:anywhere;}
 .bento, .bento *, .metrics, .metric, .pipeline, .agent-stage, .retry-loop, .critic-box,
 .studio-bar, .editorial-badges, .editorial-pill, .verified-grounds, .fact-strip, .fact-chip,
 .summary-grid, .overlay-row, .trace {box-sizing:border-box;}
 .bento, .fact-chip, .summary-grid > *, .editorial-badges > * {min-width:0;overflow-wrap:anywhere;}
-@media(max-width:400px) {
+@media(max-width:320px) {
  .fact-strip, .summary-grid {grid-template-columns:minmax(0,1fr);}
  .pipeline {flex-direction:column;}
  .pipeline-arrow {display:none;}
@@ -134,6 +151,29 @@ button:focus-visible, input:focus-visible, [role="combobox"]:focus-visible {outl
 [data-baseweb="select"] > div {background:#11131A;color:#E8ECF4;border-color:#394256;}
 @media(max-width:900px) {.metrics{grid-template-columns:repeat(3,minmax(0,1fr));}}
 @media(max-width:500px) {.metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.studio-bar{align-items:flex-start;flex-direction:column;}}
+.pitch-legend {display:flex;flex-wrap:wrap;gap:10px 18px;margin-bottom:12px;line-height:1.5;font-size:.78rem;}
+.pitch-legend span {white-space:nowrap;}
+.st-key-pitch_surface {padding:16px;background:#11131A;border:1px solid #1E2230;border-radius:8px;}
+.st-key-pitch_surface [data-testid="stPlotlyChart"] {border:0;border-radius:0;}
+@media(max-width:600px) {
+ .block-container {padding-left:16px !important;padding-right:16px !important;}
+ .st-key-studio_header [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;}
+ .st-key-studio_header [data-testid="stColumn"] {width:100% !important;min-width:0;}
+ .studio-bar h1 {font-size:1.35rem !important;}
+ .section-heading {margin-top:16px !important;margin-bottom:8px !important;}
+ .st-key-play_navigation {margin-bottom:12px;}
+ .st-key-narrative_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+ .st-key-narrative_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
+ .st-key-narrative_controls [data-testid="stColumn"]:first-child {grid-column:1 / -1;}
+ .pipeline {flex-direction:column;}
+ .commentary {font-size:1rem;line-height:1.65;}
+ .narrative-headline {font-size:1.35rem !important;}
+ .handoff-list {padding:8px;gap:12px !important;}
+ .handoff-list .handoff-card {padding:16px;}
+ .pitch-legend {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;font-size:.7rem;}
+ .pitch-legend span {white-space:normal;}
+ .st-key-pitch_surface {padding:12px;}
+}
 @media(prefers-reduced-motion:reduce) {*{animation:none !important;transition:none !important;}}
 </style>
 """
@@ -215,7 +255,7 @@ def main() -> None:
         title_column.markdown('<div class="studio-bar"><h1>Broadcast studio</h1></div>', unsafe_allow_html=True)
         with help_column.container(horizontal_alignment='right'):
             with st.popover('Help'):
-                st.markdown('Choose a **Play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
+                st.markdown('Use **Choose a play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
                             'to inspect that moment; the final milestone shows the full play. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
                             'Use **Agent behavior** beside the telemetry diagram to demonstrate a clean run, critic recovery or safe fallback.')
@@ -229,7 +269,9 @@ def main() -> None:
         if not ids:
             html_card('No episodes loaded. Load synthetic episodes in the backend and refresh.')
             return
-        goal_id = st.selectbox('Play', ids, key='episode', format_func=lambda value: EPISODE_LABELS.get(value, value))
+        st.markdown('<h2 class="section-heading">Choose a play</h2>', unsafe_allow_html=True)
+        goal_id = st.selectbox('Choose a play', ids, key='episode', label_visibility='collapsed',
+                               format_func=lambda value: EPISODE_LABELS.get(value, value))
         episode_key = (service.api_base_url, goal_id)
         try:
             if st.session_state.get('_episode_key') != episode_key:
@@ -248,12 +290,13 @@ def main() -> None:
         tactical_slot = st.container(key='tactical_domain')
     with right:
         st.markdown('<h2 class="section-heading">Why this goal happened</h2>', unsafe_allow_html=True)
-        narrative_controls = st.columns(3, vertical_alignment='bottom', gap='small')
-        persona = narrative_controls[0].selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get)
-        language = narrative_controls[1].selectbox('Language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
-        players = {event.player_id: event.player_name for event in episode.events}
-        focus_id = narrative_controls[2].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
-                                format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
+        with st.container(key='narrative_controls'):
+            narrative_controls = st.columns(3, vertical_alignment='bottom', gap='small')
+            persona = narrative_controls[0].selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get)
+            language = narrative_controls[1].selectbox('Language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
+            players = {event.player_id: event.player_name for event in episode.events}
+            focus_id = narrative_controls[2].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
+                                    format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
         editorial_slot = st.container(key='editorial_domain')
         st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
         agent_controls = st.columns([1.4, 1], vertical_alignment='bottom', gap='small')
@@ -310,15 +353,25 @@ def main() -> None:
                         label += ' / Full play'
                     with column:
                         st.button(f'{number}. +{milestone.relative_sec:.1f}s · {label}  \n'
-                                  f'{milestone.player_name}{" · Current" if milestone.is_current else ""}',
+                                  f'{milestone.player_name}',
                                   key=f'milestone_{milestone.event_id}',
                                   type='primary' if milestone.is_current else 'secondary',
                                   on_click=seek_replay, args=(milestone.relative_sec,), width='stretch', wrap=True)
         st.markdown('<h2 class="section-heading">Explore the play</h2>', unsafe_allow_html=True)
         figure = build_pitch_figure(result, clock)
         figure.update_layout(height=420)
-        st.plotly_chart(figure, width='stretch',
-                        config={'displayModeBar': False}, theme=None, key='pitch')
+        # HTML reflows the legend at narrow widths; pitch annotations remain on the plot.
+        figure.layout.annotations = tuple(annotation for annotation in figure.layout.annotations
+                                          if not (annotation.xref == 'paper' and annotation.yref == 'paper'))
+        figure.update_layout(margin=dict(l=14, r=20, t=24, b=48))
+        with st.container(key='pitch_surface'):
+            st.markdown('<div class="pitch-legend" aria-label="Pitch legend">'
+                        '<span style="color:#E8B86D">● Key pass</span>'
+                        '<span style="color:#76ADFF">◎ Focused player</span>'
+                        '<span style="color:#E58F94">✕ Bypassed defender</span>'
+                        '<span style="color:#A6B0C3">✕ Active defender</span></div>', unsafe_allow_html=True)
+            st.plotly_chart(figure, width='stretch',
+                            config={'displayModeBar': False, 'responsive': True}, theme=None, key='pitch')
         with st.container(key='pitch_note'):
             st.caption('Defenders are a static snapshot; active/bypassed refers only to the key-pass comparison.')
         st.markdown('<h2 class="section-heading">On-screen facts at this moment</h2>', unsafe_allow_html=True)
@@ -339,9 +392,10 @@ def main() -> None:
         for item in active_overlays:
             render_overlay(item)
         if history:
-            with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
-                for item in reversed(history):
-                    render_overlay(item)
+            with st.container(key='overlay_history'):
+                with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
+                    for item in reversed(history):
+                        render_overlay(item)
     with editorial_slot:
         focus = result.focus
         focus_text = ('Whole team' if focus.player_id is None else
@@ -367,11 +421,15 @@ def main() -> None:
                       f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
                       f'<div class="caption">Orchestration latency: {telemetry.latency_ms:.2f} ms / '
                       f'{"Local simulation" if simulated else escape(source)}</div></div>')
-            with st.expander('Inspect agent handoffs', expanded=simulated):
-                for handoff in telemetry.handoffs:
-                    html_card(f'<div class="caption">Attempt {handoff.attempt}</div>'
-                              f'<div>{escape(handoff.from_agent)} → {escape(handoff.to_agent)}</div>'
-                              f'<p class="caption">{escape(handoff.reason)}</p>')
+            with st.container(key='handoff_panel'):
+                with st.expander('Inspect agent handoffs', expanded=simulated):
+                    cards = ''.join(
+                        f'<div class="bento handoff-card"><div class="caption">Attempt {handoff.attempt}</div>'
+                        f'<div class="handoff-route">{escape(handoff.from_agent)} → {escape(handoff.to_agent)}</div>'
+                        f'<p class="caption">{escape(handoff.reason)}</p></div>'
+                        for handoff in telemetry.handoffs
+                    )
+                    st.markdown(f'<div class="handoff-list">{cards}</div>', unsafe_allow_html=True)
 
 
 if __name__ == '__main__':
