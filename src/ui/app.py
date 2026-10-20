@@ -174,6 +174,33 @@ button:focus-visible, input:focus-visible, [role="combobox"]:focus-visible {outl
  .pitch-legend span {white-space:normal;}
  .st-key-pitch_surface {padding:12px;}
 }
+/* Tablet layout follows usable width rather than a device model. */
+@media(max-width:1180px) {
+ .block-container {padding-left:24px !important;padding-right:24px !important;}
+ .st-key-studio_domains [data-testid="stHorizontalBlock"]:has(.st-key-tactical_domain) {flex-direction:column;gap:32px;align-items:stretch;}
+ .st-key-studio_domains [data-testid="stColumn"]:has(.st-key-tactical_domain),
+ .st-key-studio_domains [data-testid="stColumn"]:has(.st-key-editorial_domain) {width:100% !important;flex:1 1 auto !important;min-width:0;}
+}
+@media(min-width:601px) and (max-width:1180px) {
+ .metrics {grid-template-columns:repeat(3,minmax(0,1fr));}
+ .st-key-replay_controls [data-testid="stHorizontalBlock"] {grid-template-columns:repeat(4,minmax(0,1fr));}
+ .pitch-legend {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 24px;}
+ .section-heading {margin-top:20px !important;}
+}
+.st-key-narrative_controls, .st-key-agent_controls, .st-key-telemetry_domain {container-type:inline-size;}
+@container (max-width:480px) {
+ .st-key-narrative_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+ .st-key-narrative_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
+ .st-key-narrative_controls [data-testid="stColumn"]:first-child {grid-column:1 / -1;}
+ .st-key-agent_controls [data-testid="stHorizontalBlock"] {display:grid;grid-template-columns:minmax(0,1fr);gap:12px;}
+ .st-key-agent_controls [data-testid="stColumn"] {width:100% !important;min-width:0;}
+ .pipeline {flex-direction:column;}
+ .pipeline-arrow {display:none;}
+ .agent-stage {overflow-wrap:normal;word-break:normal;}
+}
+@media(max-width:600px) {
+ .block-container {padding-left:16px !important;padding-right:16px !important;}
+}
 @media(prefers-reduced-motion:reduce) {*{animation:none !important;transition:none !important;}}
 </style>
 """
@@ -285,7 +312,8 @@ def main() -> None:
             html_card(escape(str(error)))
             return
     metrics_slot = st.empty()
-    left, right = st.columns([1.65, 1], gap='medium')
+    with st.container(key='studio_domains'):
+        left, right = st.columns([1.65, 1], gap='medium')
     with left:
         tactical_slot = st.container(key='tactical_domain')
     with right:
@@ -299,16 +327,17 @@ def main() -> None:
                                     format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
         editorial_slot = st.container(key='editorial_domain')
         st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
-        agent_controls = st.columns([1.4, 1], vertical_alignment='bottom', gap='small')
-        behavior_labels = dict(zip(DEMO_MODES, [
-            'Clean run (first-pass success)',
-            'Single mistake (critic recovers)',
-            'Repeated mistake (safe fallback)',
-        ]))
-        mode = agent_controls[0].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
-                                     format_func=behavior_labels.get)
-        agent_controls[1].button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative,
-                                 width='stretch', wrap=True)
+        with st.container(key='agent_controls'):
+            agent_controls = st.columns([1.4, 1], vertical_alignment='bottom', gap='small')
+            behavior_labels = dict(zip(DEMO_MODES, [
+                'Clean run (first-pass success)',
+                'Single mistake (critic recovers)',
+                'Repeated mistake (safe fallback)',
+            ]))
+            mode = agent_controls[0].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
+                                         format_func=behavior_labels.get)
+            agent_controls[1].button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative,
+                                     width='stretch', wrap=True)
         telemetry_slot = st.container(key='telemetry_domain')
     key = (episode_key, persona, language, focus_id, mode)
     try:
