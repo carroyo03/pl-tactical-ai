@@ -117,7 +117,7 @@ p {line-height:1.55; max-width:76ch;}
 .st-key-telemetry .bento, .st-key-telemetry .pipeline,
 .st-key-telemetry .retry-loop, .st-key-telemetry .critic-box {margin:0;}
 .st-key-telemetry button {min-height:44px;padding:var(--space-8) var(--space-16);}
-.st-key-regenerate_narrative {margin-top:14px !important;margin-bottom:12px !important;}
+.st-key-telemetry_domain {margin-top:14px;margin-bottom:12px;}
 .bento, .bento *, .metrics, .metric, .pipeline, .agent-stage, .retry-loop, .critic-box,
 .studio-bar, .editorial-badges, .editorial-pill, .verified-grounds, .fact-strip, .fact-chip,
 .summary-grid, .overlay-row, .trace {box-sizing:border-box;}
@@ -215,13 +215,12 @@ def main() -> None:
         title_column.markdown('<div class="studio-bar"><h1>Broadcast studio</h1></div>', unsafe_allow_html=True)
         with help_column.container(horizontal_alignment='right'):
             with st.popover('Help'):
-                st.markdown('Choose a play and commentary voice in the control bar. Select a **Key Events** milestone '
+                st.markdown('Choose a **Play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
                             'to inspect that moment; the final milestone shows the full play. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
-                            'Use **Agent behavior** to demonstrate a clean run, critic recovery or safe fallback.')
+                            'Use **Agent behavior** beside the telemetry diagram to demonstrate a clean run, critic recovery or safe fallback.')
                 st.caption(source + ' / Fictional players and events. Normalized coordinates; static defensive snapshot.')
     with st.container(key='studio_controls'):
-        controls = st.columns(5, vertical_alignment='bottom', gap='small')
         try:
             ids = service.list_goal_ids()
         except StudioServiceError as error:
@@ -230,9 +229,7 @@ def main() -> None:
         if not ids:
             html_card('No episodes loaded. Load synthetic episodes in the backend and refresh.')
             return
-        goal_id = controls[0].selectbox('Play', ids, key='episode', format_func=lambda value: EPISODE_LABELS.get(value, value))
-        persona = controls[1].selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get)
-        language = controls[2].selectbox('Language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
+        goal_id = st.selectbox('Play', ids, key='episode', format_func=lambda value: EPISODE_LABELS.get(value, value))
         episode_key = (service.api_base_url, goal_id)
         try:
             if st.session_state.get('_episode_key') != episode_key:
@@ -240,20 +237,36 @@ def main() -> None:
                 st.session_state['_episode_key'] = episode_key
                 st.session_state.pop('focus', None)
                 st.session_state.pop('_result_key', None)
+                st.session_state.pop('replay_clock', None)
             episode = st.session_state['_episode_data']
         except StudioServiceError as error:
             html_card(escape(str(error)))
             return
+    metrics_slot = st.empty()
+    left, right = st.columns([1.65, 1], gap='medium')
+    with left:
+        tactical_slot = st.container(key='tactical_domain')
+    with right:
+        st.markdown('<h2 class="section-heading">Why this goal happened</h2>', unsafe_allow_html=True)
+        narrative_controls = st.columns(3, vertical_alignment='bottom', gap='small')
+        persona = narrative_controls[0].selectbox('Commentary style', list(PERSONA_LABELS), key='persona', format_func=PERSONA_LABELS.get)
+        language = narrative_controls[1].selectbox('Language', ['en', 'es'], key='language', format_func=lambda value: 'English' if value == 'en' else 'Español')
         players = {event.player_id: event.player_name for event in episode.events}
-        focus_id = controls[3].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
+        focus_id = narrative_controls[2].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
                                 format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
+        editorial_slot = st.container(key='editorial_domain')
+        st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
+        agent_controls = st.columns([1.4, 1], vertical_alignment='bottom', gap='small')
         behavior_labels = dict(zip(DEMO_MODES, [
             'Clean run (first-pass success)',
             'Single mistake (critic recovers)',
             'Repeated mistake (safe fallback)',
         ]))
-        mode = controls[4].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
+        mode = agent_controls[0].selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
                                      format_func=behavior_labels.get)
+        agent_controls[1].button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative,
+                                 width='stretch', wrap=True)
+        telemetry_slot = st.container(key='telemetry_domain')
     key = (episode_key, persona, language, focus_id, mode)
     try:
         if st.session_state.get('_result_key') != key:
@@ -261,7 +274,6 @@ def main() -> None:
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
             )
             st.session_state['_result_key'] = key
-            st.session_state.pop('replay_clock', None)
         result = st.session_state['_broadcast']
     except StudioServiceError as error:
         html_card(escape(str(error)))
@@ -278,31 +290,30 @@ def main() -> None:
         ('Pass difficulty', f'{metrics.pass_difficulty:.1f} / 100' if metrics.pass_difficulty is not None else 'Unavailable'),
         ('Pass accuracy', f'{100*metrics.pass_accuracy:.0f}%' if metrics.pass_accuracy is not None else 'Unavailable'),
     ]
-    st.markdown('<div class="metrics">' + ''.join(
+    metrics_slot.markdown('<div class="metrics">' + ''.join(
         f'<div class="metric"><div class="caption">{escape(label)}</div><div class="value">{escape(value)}</div></div>'
         for label, value in values) + '</div>', unsafe_allow_html=True)
     duration = episode.timestamp_goal - min(event.timestamp_sec for event in episode.events)
     st.session_state.setdefault('replay_clock', float(duration))
     current = float(st.session_state['replay_clock'])
     timeline = build_event_timeline(result, current)
-    with st.container(key='play_navigation', gap='small'):
-        st.markdown('<h2 class="section-heading">Key Events</h2>', unsafe_allow_html=True)
-        with st.container(key='replay_controls'):
-            columns = st.columns(len(timeline), gap='small')
-            for number, (column, milestone) in enumerate(zip(columns, timeline), 1):
-                label = milestone.label
-                if number == len(timeline):
-                    label += ' / Full play'
-                with column:
-                    st.button(f'{number}. +{milestone.relative_sec:.1f}s · {label}  \n'
-                              f'{milestone.player_name}{" · Current" if milestone.is_current else ""}',
-                              key=f'milestone_{milestone.event_id}',
-                              type='primary' if milestone.is_current else 'secondary',
-                              on_click=seek_replay, args=(milestone.relative_sec,), width='stretch', wrap=True)
     clock = current
     frame = filter_synchronized_overlays(result, clock)
-    left, right = st.columns([1.65, 1], gap='medium')
-    with left:
+    with tactical_slot:
+        with st.container(key='play_navigation', gap='small'):
+            st.markdown('<h2 class="section-heading">Key Events</h2>', unsafe_allow_html=True)
+            with st.container(key='replay_controls'):
+                columns = st.columns(len(timeline), gap='small')
+                for number, (column, milestone) in enumerate(zip(columns, timeline), 1):
+                    label = milestone.label
+                    if number == len(timeline):
+                        label += ' / Full play'
+                    with column:
+                        st.button(f'{number}. +{milestone.relative_sec:.1f}s · {label}  \n'
+                                  f'{milestone.player_name}{" · Current" if milestone.is_current else ""}',
+                                  key=f'milestone_{milestone.event_id}',
+                                  type='primary' if milestone.is_current else 'secondary',
+                                  on_click=seek_replay, args=(milestone.relative_sec,), width='stretch', wrap=True)
         st.markdown('<h2 class="section-heading">Explore the play</h2>', unsafe_allow_html=True)
         figure = build_pitch_figure(result, clock)
         figure.update_layout(height=420)
@@ -331,8 +342,7 @@ def main() -> None:
             with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
                 for item in reversed(history):
                     render_overlay(item)
-    with right:
-        st.markdown('<h2 class="section-heading">Why this goal happened</h2>', unsafe_allow_html=True)
+    with editorial_slot:
         focus = result.focus
         focus_text = ('Whole team' if focus.player_id is None else
                       f'{focus.player_name} · {len(focus.event_ids)} actions' if focus.participated else
@@ -349,7 +359,7 @@ def main() -> None:
                   '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
                   f'<div class="fact-strip">{chips}</div>'
                   f'<span class="sr-only">{escape(result.narrative.tactical_breakdown)}</span></div>', 'editorial-card')
-        st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
+    with telemetry_slot:
         outcome = {'SUCCESS': 'Accepted', 'RECOVERED': 'Recovered after retry',
                    'DEGRADED_FALLBACK': 'Safe fallback'}[status]
         with st.container(key='telemetry'):
@@ -357,7 +367,6 @@ def main() -> None:
                       f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
                       f'<div class="caption">Orchestration latency: {telemetry.latency_ms:.2f} ms / '
                       f'{"Local simulation" if simulated else escape(source)}</div></div>')
-            st.button('Regenerate narrative', key='regenerate_narrative', on_click=regenerate_narrative)
             with st.expander('Inspect agent handoffs', expanded=simulated):
                 for handoff in telemetry.handoffs:
                     html_card(f'<div class="caption">Attempt {handoff.attempt}</div>'
