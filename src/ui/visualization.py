@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from math import isfinite
 from html import escape
+import re
 
 import plotly.graph_objects as go
 
@@ -15,6 +16,139 @@ PANEL = '#11131A'
 BLUE = '#76ADFF'
 AMBER = '#E8B86D'
 TEXT = '#E8ECF4'
+
+
+def build_analysis_explanations(response: BroadcastResponse) -> list[tuple[str, str]]:
+    """Readable Markdown sections from existing backend evidence; no new analysis."""
+    evidence = response.tactical_evidence
+    if evidence is None:
+        return []
+
+    def plain(value: str) -> str:
+        # Source names and IDs remain text, never Markdown links or formatting.
+        return re.sub(r'([\\`*_{}\[\]()#+!|>~])', r'\\\1', escape(value))
+
+    events = {event.event_id: event for event in response.episode.events}
+    names = {event.player_id: event.player_name for event in response.episode.events}
+    defenders = {defender.player_id: defender for defender in response.episode.defenders_snapshot}
+    key = next((item for item in evidence.passes if item.event_id == evidence.key_pass_event_id), None)
+    explanations = []
+    if key is None:
+        explanations.append(('Why this pass?',
+            '**No completed scoring-team pass is available.**\n\n'
+            'Packing is zero. A highlighted pass cannot be selected.'))
+        explanations.append(('Where did the breakthrough start?',
+            '**No breakdown zone is assigned.**\n\n'
+            'A zone requires a completed scoring-team pass with positive packing.'))
+    else:
+        counted = '\n'.join(
+            f'- The reference defender **{plain(player)}** is positioned at **X={defenders[player].x:g}**, '
+            'between the start and end of this pass.'
+            for player in key.bypassed_defender_ids
+        ) or 'No reference defenders lie strictly between the start and end of this pass.'
+        comparisons = '\n'.join(
+            f'- {plain(names[item.player_id])} completes a pass that bypasses **{item.packing_score} '
+            f'{"reference defender" if item.packing_score == 1 else "reference defenders"}** '
+            f'in the static snapshot. This pass is recorded as {plain(item.event_id)}.'
+            for item in evidence.passes)
+        offset = key.timestamp_sec - min(event.timestamp_sec for event in response.episode.events)
+        explanations.append(('Why this pass?',
+            f'**The pass by {plain(names[key.player_id])} is highlighted because it has the highest '
+            f'packing score in this episode: {key.packing_score}.**\n\n'
+            f'This pass is completed **{offset:g} seconds after the episode begins**. '
+            f'Its origin is recorded at **X={key.start_x:g}** and its destination at **X={key.end_x:g}** on the normalized pitch. '
+            'Defender references are counted when their X positions lie strictly between those two points.\n\n'
+            '**These defenders contribute to the score:**\n\n'
+            f'{counted}\n\n'
+            '**The completed passes are compared as follows:**\n\n'
+            f'{comparisons}\n\n'
+            'The pass with the highest score is selected. If several passes share that score, '
+            'the earliest one in the episode is selected. A defender at either endpoint is excluded.\n\n'
+            f'*The selected event is recorded as {plain(key.event_id)} at {key.timestamp_sec:g} seconds '
+            'on the match clock. The score compares one static snapshot; it does not establish an assist '
+            'or show how the defenders moved.*'))
+        zone_result = response.analysis.breakdown_zone or 'Unavailable'
+        explanations.append(('Where did the breakthrough start?',
+            (f'**The highlighted pass begins in the {zone_result.lower()}.**\n\n'
+             if key.packing_score > 0 else
+             '**A breakdown zone cannot be assigned because the packing score is zero.**\n\n')
+            + f'The pass starts at **X={key.start_x:g}** on a pitch whose coordinates run from 0 to 100. '
+            'This starting position is used to assign a zone when the packing score is positive.\n\n'
+            '- The **defensive third** is assigned when the starting X is below 33.3.\n'
+            '- The **middle third** is assigned when the starting X is at least 33.3 and below 66.6.\n'
+            '- The **attacking third** is assigned when the starting X is at least 66.6.\n\n'
+            '*This zone describes where the selected pass starts. It does not locate the receiver '
+            'or establish where a defensive line was physically broken.*'))
+    links = '\n'.join(
+        f'- **{plain(names[link.inferred_recipient_id])} is inferred to be the receiver of the pass by {plain(names[link.passer_id])}** '
+        f'because event {plain(link.next_event_id)} immediately follows the completed pass '
+        f'{plain(link.pass_event_id)} and belongs to that teammate.'
+        for link in evidence.inferred_connections
+    ) or 'The recorded events do not provide any eligible passing connections.'
+    pivot = response.analysis.tactical_pivot
+    scores = '\n'.join(f'- A score of **{score:.3f}** is assigned to **{plain(names[player])}**.'
+                       for player, score in evidence.pivot_scores.items())
+    pivot_text = (f'**{plain(names[pivot])} is the selected connector.**\n\n'
+                  'A network is built from the completed passes and their inferred receivers. '
+                  'Each player is scored by how often they connect other players along the '
+                  'network’s shortest routes. The player with the highest score is selected as the tactical pivot.\n\n'
+                  if pivot else '**A connector cannot be selected because the network has no eligible passing connections.**\n\n')
+    if len(evidence.pivot_tied_player_ids) > 1:
+        pivot_text += '**The tie is resolved using the event order.** ' + ', '.join(plain(names[player]) for player in evidence.pivot_tied_player_ids) + ' share the highest score, so the player who appears first chronologically is selected.\n\n'
+    if pivot is not None and evidence.pivot_scores[pivot] == 0:
+        pivot_text += '**All scores are zero, so the selection comes entirely from the chronological tie-break.** The data does not identify a standout connector.\n\n'
+    if scores:
+        pivot_text += '**Normalized betweenness scores**\n\nThese dimensionless scores range from 0 to 1.\n\n' + scores + '\n\n'
+    explanations.append(('Why this connector?', pivot_text + '**The events support these inferred connections:**\n\n' + links + '\n\n'
+        '*Receivers are not identified explicitly in the input. Each receiver is inferred from the immediately '
+        'following event, and that inference is interrupted by a rival event. Multiple passes between the same '
+        'two players are represented by a single connection in this unweighted network.*'))
+    first = events[evidence.first_event_id]
+    rules = {
+        'SUCCESSFUL_RECOVERY_WITHIN_10_SECONDS': 'The first event is a successful scoring-team recovery and the goal follows within ten seconds.',
+        'PACKING_AT_LEAST_3': 'The recovery rule does not apply and maximum static packing is at least three. The legacy label does not prove a central channel.',
+        'DEFAULT_POSITIONAL': 'Neither the recovery rule nor the packing threshold applies. Positional attack is a fallback label, not measured possession control.',
+    }
+    explanations.append(('Why this tactical label?',
+        f'**This episode is classified as “{response.analysis.tactical_cause}”.**\n\n'
+        f'{rules[evidence.cause_rule]}\n\n'
+        f'The episode begins with {plain(first.player_name)} performing a '
+        f'{first.event_type.replace("_", " ").lower()} for the {first.team} team. '
+        f'The event is recorded as {"successful" if first.is_successful else "unsuccessful"}, '
+        f'and the goal follows **{evidence.duration_sec:g} seconds later**.\n\n'
+        '**The first matching rule is applied:**\n\n'
+        '1. A **quick transition** is assigned when the first event is a successful recovery '
+        'by the scoring team and the goal follows within ten seconds.\n'
+        '2. Otherwise, the **central breakthrough** label is assigned when the maximum packing score is at least three.\n'
+        '3. If neither condition applies, **positional attack** is assigned as the fallback label.\n\n'
+        '*This is a rule-based classification, not proof of why the goal happened.*'))
+    metrics = response.broadcast_metrics
+    accuracy_text = (f'**The scoring team completes {metrics.successful_passes} of its '
+                     f'{metrics.total_passes} attempted passes, giving an accuracy of {metrics.pass_accuracy * 100:.0f}%.**'
+                     if metrics.pass_accuracy is not None else
+                     '**Pass accuracy cannot be calculated because the scoring team has no recorded pass attempts.**')
+    explanations.append(('How is pass accuracy calculated?',
+        f'{accuracy_text}\n\n'
+        'The number of completed passes is divided by the number of attempted passes, and the result is multiplied '
+        'by 100. Only the scoring team’s passes are counted, and failed attempts are included in the total.\n\n'
+        '*This percentage describes the recorded episode. It does not measure a player’s accuracy across a match or season.*'))
+    difficulty_text = (f'**The highlighted pass is assigned a difficulty score of {metrics.pass_difficulty:.1f} out of 100.**'
+                       if metrics.pass_difficulty is not None else
+                       '**A difficulty score cannot be calculated for the highlighted pass.**')
+    explanations.append(('What does pass difficulty mean?',
+        f'{difficulty_text}\n\n'
+        'The highlighted pass receives a higher score for greater distance, more forward progress '
+        'and more defender references bypassed.\n\n'
+        '- The **distance component** contributes up to 40 points as the pass becomes longer.\n'
+        '- The **forward-progress component** contributes up to 30 points as the pass gains ground along X.\n'
+        '- The **packing component** contributes up to 30 points. It reaches its maximum at five defenders.\n\n'
+        '**The score is calculated with this formula:**\n\n'
+        '40 × normalized distance / (100√2) + 30 × positive X gain / 100 + 30 × min(packing / 5, 1), capped at 100.\n\n'
+        '*This is not a calibrated completion probability. Missing destination Y means unavailable distance and difficulty.*'))
+    explanations.append(('What are the limitations?',
+        '**These explanations are based on synthetic events and approximate tactical evidence.**\n\n'
+        + '\n'.join(f'- {plain(item)}' for item in evidence.limitations)))
+    return explanations
 
 
 @dataclass(frozen=True)

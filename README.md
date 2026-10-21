@@ -79,8 +79,8 @@ explicit focus participation and orchestration telemetry. The original
 `/intelligence` response still has exactly three keys. Broadcast generation uses
 three specialized roles with one feedback-driven retry and a validated degraded
 fallback. No meters or ball speeds are inferred. See spec.md for formulas, units,
-classification thresholds and limitations. Overlay rendering belongs to the
-upcoming UI; currently these are machine-readable replay markers.
+classification thresholds and limitations. The studio renders these markers
+against the selected synthetic replay event.
 
 ## Broadcast Studio UI
 
@@ -98,7 +98,7 @@ The UI has been verified with the locked Streamlit/Plotly versions.
 
 Select an episode, persona, narrative language and optional focus player. The
 external-player option demonstrates absence without attributing involvement.
-Move the replay clock to reveal events and overlays at their relative times.
+Select a Key Events milestone to reveal events and overlays at their relative times.
 The top metrics and commentary describe the full episode; the pitch and overlay
 cards follow the clock. History cards remain visible and are muted. A zero-time
 focused recovery may already have an overlay at the start of replay.
@@ -111,7 +111,34 @@ Agent demo modes intentionally inject invalid creative drafts locally:
 
 Simulations are explicitly labelled and never send failure-injection requests
 to a remote service. Clock changes reuse the stored result and do not generate
-narratives. Changing controls or pressing Regenerate narrative starts a new run.
+narratives. Changing narrative controls starts a new run.
+
+### Explain a tactical result
+
+Open **Why these results?** below the narrative for full-episode evidence:
+the selected pass, its strict X interval and counted defender references;
+the inferred passing connections and pivot centrality scores; chronological
+tie-breaks; and the ordered classification rule. Pass accuracy displays its
+denominator, for example `100% (2/2)`. Difficulty remains a documented heuristic.
+
+Packing, key-pass selection and the pass graph now consistently consider only
+completed scoring-team passes. Rival events remain on the replay clock and can
+interrupt recipient inference. A quick-transition label requires the first
+chronological event to be a successful scoring-team recovery within ten seconds
+of the goal. These corrections affect mixed-team or failed-recovery inputs;
+the three canonical scenarios retain their existing analysis values.
+
+The existing episode and analysis contracts are unchanged. `/broadcast` adds
+optional `tactical_evidence` with version `tactical-evidence-v1`; older responses
+without it still parse, and the studio reports missing evidence instead of
+calculating substitute facts. Evidence is computed by the analyst before creative
+generation and does not change on retry or fallback.
+
+The legacy central-breakthrough label is retained for compatibility; it means
+packing is at least three after the recovery rule fails, not an observed central
+channel. The zero-centrality pivot tie is reported explicitly. Neither these
+labels nor the authored reconstruction establish causality, continuous possession,
+ball speed, or time-aligned defensive movement.
 
 To consume the FastAPI backend instead:
 

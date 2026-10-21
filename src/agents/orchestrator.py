@@ -11,6 +11,7 @@ from src.agents.narrator import (
     NarrativeOutput, NarrativeRequest, Persona, PersonaNarrator, SYSTEM_PROMPT, TONES,
 )
 from src.analytics.reconstruction import SyntheticReconstruction
+from src.analytics.evidence import TacticalEvidence
 from src.analytics.broadcast import BroadcastMetrics, FocusParticipation, compute_broadcast
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
@@ -41,6 +42,7 @@ class OrchestrationState(StrictModel):
     request: NarrativeRequest
     focus_player_id: str | None = None
     analysis: TacticalAnalysisResponse | None = None
+    tactical_evidence: TacticalEvidence | None = None
     broadcast_metrics: BroadcastMetrics | None = None
     focus: FocusParticipation | None = None
     context: dict = Field(default_factory=dict)
@@ -60,6 +62,7 @@ class BroadcastResponse(StrictModel):
     focus: FocusParticipation
     telemetry: ExecutionTelemetry
     reconstruction: SyntheticReconstruction | None = None
+    tactical_evidence: TacticalEvidence | None = None
 
     @model_validator(mode='after')
     def validate_reconstruction(self):
@@ -70,13 +73,15 @@ class BroadcastResponse(StrictModel):
 
 class TacticalAnalystAgent:
     def run(self, state: OrchestrationState) -> None:
-        state.analysis = TacticalEngine().analyze(state.episode)
+        state.analysis, state.tactical_evidence = TacticalEngine().analyze_with_evidence(state.episode)
         state.broadcast_metrics, state.focus = compute_broadcast(state.episode, state.focus_player_id)
         state.context, state.tactical_breakdown, state.grounding = PersonaNarrator().prepare(
             state.episode, state.analysis, broadcast_metrics=state.broadcast_metrics, **state.request.model_dump(),
         )
         state.context['focus'] = state.focus.model_dump()
         state.context['broadcast_metrics'] = state.broadcast_metrics.model_dump()
+        state.context['tactical_evidence'] = state.tactical_evidence.model_dump()
+        state.grounding['facts']['allowed_numbers'].extend(state.tactical_evidence.pivot_scores.values())
 
 
 
@@ -182,5 +187,5 @@ class BroadcastOrchestrator:
         return BroadcastResponse(
             episode=state.episode, analysis=state.analysis, narrative=state.narrative,
             broadcast_metrics=state.broadcast_metrics, focus=state.focus, telemetry=state.telemetry,
-            reconstruction=reconstruction,
+            reconstruction=reconstruction, tactical_evidence=state.tactical_evidence,
         )

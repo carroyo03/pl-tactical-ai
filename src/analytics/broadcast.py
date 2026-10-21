@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from src.analytics.schemas import GoalEpisode, ID, StrictModel, Time
+from src.analytics.sequence import bypassed_defender_ids, scoring_passes
 
 Nonnegative = Annotated[float, Field(ge=0)]
 Score = Annotated[float, Field(ge=0, le=100)]
@@ -50,9 +51,9 @@ def compute_broadcast(episode: GoalEpisode, focus_player_id: str | None = None) 
         player_id=focus_player_id, player_name=involvement[0].player_name if involvement else None,
         participated=bool(involvement), event_ids=[e.event_id for e in involvement],
     )
-    passes = [e for e in events if e.team == episode.scoring_team and e.event_type == 'PASS']
+    passes = scoring_passes(episode)
     successes = [e for e in passes if e.is_successful]
-    packing = {e.event_id: sum(e.start_x < d.x < e.end_x for d in episode.defenders_snapshot)
+    packing = {e.event_id: len(bypassed_defender_ids(episode, e))
                for e in successes}
     key = max(successes, key=lambda e: packing[e.event_id], default=None)
     distance = None

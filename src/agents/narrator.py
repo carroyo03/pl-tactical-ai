@@ -91,6 +91,9 @@ Generate only headline (at most 12 whitespace-separated words) and commentary.
 Do not generate tactical_breakdown. Follow the requested language and persona.
 Only state numeric facts supplied in context. Defender counts mean the engine maximum
 packing on one pass, never a sum. Do not confuse the tactical pivot with the key-pass author.
+Only successful scoring-team passes contribute to packing and the pass graph.
+Tactical causes are rule-based labels, not causal proof. The legacy central-breakthrough
+label means high static packing; do not infer a central channel from it.
 """
 
 
@@ -108,7 +111,7 @@ class MockLLMClient:
         cause = context['analysis']['tactical_cause']
         causes = {
             'Quick transition after recovery': ('a quick transition after the recovery', 'una transición rápida tras la recuperación'),
-            'Central breakthrough through a vertical pass': ('a vertical breakthrough through the middle', 'una ruptura central con un pase vertical'),
+            'Central breakthrough through a vertical pass': ('a forward pass with high static packing', 'un pase hacia delante con alto packing estático'),
             'Positional attack': ('a positional attack', 'un ataque posicional'),
         }
         cause_text = causes[cause][spanish]
@@ -190,6 +193,11 @@ class MockLLMClient:
         finish = finishes[persona] if scorer else (
             'El goleador no está identificado.' if spanish else 'The scorer is not identified.'
         )
+        evidence_context = context.get('tactical_evidence', {})
+        if pivot and len(evidence_context.get('pivot_tied_player_ids', [])) > 1:
+            tie_text = (f'{pivot} es el pivote seleccionado por desempate cronológico.' if spanish else
+                        f'{pivot} is the selected pivot after a chronological tie-break.')
+            links[persona] = tie_text
         commentary = ' '.join(part for part in (openings[persona], action_text, links[persona] if pivot else '', evidence, finish) if part)
         focus = context.get('focus', {})
         if focus.get('participated') and not re.search(

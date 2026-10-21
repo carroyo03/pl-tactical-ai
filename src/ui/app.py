@@ -9,7 +9,7 @@ import streamlit as st
 from src.agents import narrator as narrator_module
 from src.ui.service import DEMO_MODES, StudioService, StudioServiceError
 from src.ui.visualization import (
-    build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
+    build_analysis_explanations, build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
 )
 
 CSS = """
@@ -350,11 +350,16 @@ def main() -> None:
         + (Path(__file__).resolve().parents[1] / 'agents/orchestrator.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'agents/grounding.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'analytics/reconstruction.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'analytics/tactical_engine.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'analytics/sequence.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'analytics/evidence.py').read_bytes()
+        + (Path(__file__).resolve().parents[1] / 'analytics/broadcast.py').read_bytes()
     ).hexdigest()
     key = (episode_key, persona, language, focus_id, mode, template_revision)
     try:
         cached = st.session_state.get('_broadcast')
-        if st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction') or not hasattr(cached.telemetry, 'narrative_provider'):
+        if (st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction')
+                or not hasattr(cached, 'tactical_evidence') or not hasattr(cached.telemetry, 'narrative_provider')):
             st.session_state['_broadcast'] = service.broadcast(
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
             )
@@ -375,7 +380,7 @@ def main() -> None:
         ('Breakthrough zone', analysis.breakdown_zone or 'Unavailable'),
         ('Play rhythm', 'Fast transition' if metrics.tempo_classification == 'HIGH_TEMPO_CHAOS' else 'Controlled buildup' if metrics.tempo_classification else 'Unavailable'),
         ('Pass difficulty', f'{metrics.pass_difficulty:.1f} / 100' if metrics.pass_difficulty is not None else 'Unavailable'),
-        ('Pass accuracy', f'{100*metrics.pass_accuracy:.0f}%' if metrics.pass_accuracy is not None else 'Unavailable'),
+        ('Pass accuracy', f'{100*metrics.pass_accuracy:.0f}% ({metrics.successful_passes}/{metrics.total_passes})' if metrics.pass_accuracy is not None else 'Unavailable'),
     ]
     metrics_slot.markdown('<div class="metrics">' + ''.join(
         f'<div class="metric"><div class="caption">{escape(label)}</div><div class="value">{escape(value)}</div></div>'
@@ -432,7 +437,8 @@ def main() -> None:
         history = [item for item in frame.timed_overlays if not item.is_active]
         summary = build_goal_summary(result, clock)
         if summary is not None:
-            accuracy = f'{100 * summary.pass_accuracy:.0f}%' if summary.pass_accuracy is not None else 'Unavailable'
+            accuracy = (f'{100 * summary.pass_accuracy:.0f}% ({metrics.successful_passes}/{metrics.total_passes})'
+                        if summary.pass_accuracy is not None else 'Unavailable')
             html_card('<h2>Goal Sequence Summary</h2><div class="caption">Consolidated episode facts / goal reached</div>'
                       '<div class="summary-grid">'
                       f'<div><span class="caption">Sequence duration</span><br><strong>{summary.duration_sec:.1f}s</strong></div>'
@@ -467,6 +473,13 @@ def main() -> None:
                   '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
                   f'<div class="fact-strip">{chips}</div>'
                   f'<span class="sr-only">{escape(result.narrative.tactical_breakdown)}</span></div>', 'editorial-card')
+        with st.expander('Why these results?', expanded=False):
+            explanations = build_analysis_explanations(result)
+            if not explanations:
+                st.caption('This API did not provide tactical evidence. No evidence has been inferred by the studio.')
+            for title, body in explanations:
+                with st.expander(title, expanded=False):
+                    st.markdown(body)
     with telemetry_slot:
         outcome = {'SUCCESS': 'Accepted', 'RECOVERED': 'Recovered after retry',
                    'DEGRADED_FALLBACK': 'Safe fallback'}[status]

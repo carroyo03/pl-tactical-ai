@@ -49,7 +49,7 @@ Attack is normalized towards increasing X.
 
 ### Packing
 
-For each successful PASS, count defenders with
+For each successful scoring-team PASS, count defenders with
 `start_x < defender.x < end_x`. Exclude endpoints; lateral/backward passes
 score zero. `sequence_packing_score` is MAX of per-pass scores (default zero),
 never their sum. Equal positive scores choose the earliest chronological pass.
@@ -61,10 +61,12 @@ The input snapshot has no timestamp; no timing is inferred from mock comments.
 
 ### Pass graph
 
-NetworkX DiGraph: for each successful PASS, connect its author to the player of
+NetworkX DiGraph: for each successful scoring-team PASS, connect its author to the player of
 its immediately following event in the full sorted sequence, including SHOT.
 This infers the recipient because the input has no explicit recipient field.
-Only connect different players of the same team. A terminal pass has no edge.
+Only connect different players of the scoring team. A rival next event interrupts
+inference; do not remove it and skip ahead to a later scoring-team event.
+A terminal pass has no edge.
 No recovery edges, self-loops or weights. Repeated edges collapse.
 Use unweighted normalized betweenness centrality. Return player ID; ties select
 the player first seen chronologically, then lexicographic ID as final fallback.
@@ -82,12 +84,19 @@ These are the requested decimal cutoffs, not mathematical thirds at 100/3.
 
 ### Tactical cause (ordered precedence)
 
-1. First chronological event is RECOVERY and
+1. First chronological event is a successful scoring-team RECOVERY and
    `timestamp_goal - first.timestamp_sec <= 10`:
    `Quick transition after recovery`.
 2. Otherwise, sequence_packing_score >= 3:
    `Central breakthrough through a vertical pass`.
 3. Otherwise: `Positional attack`.
+
+The label strings and precedence are preserved for compatibility. These are
+ordered heuristics, not causal inference. In particular, the central-breakthrough
+rule does not inspect Y or prove a central channel; positional attack is a default
+classification, not a measured possession-control state. A failed or rival
+recovery cannot trigger the quick-transition rule. All timestamps remain on the
+episode clock; scoring-team eligibility does not establish continuous possession.
 
 ## TacticalAnalysisResponse
 
@@ -167,7 +176,7 @@ sdk = AzureOpenAI(
     azure_endpoint=os.environ['AZURE_OPENAI_ENDPOINT'],
     api_key=os.environ['AZURE_OPENAI_API_KEY'],
     api_version=os.environ['AZURE_OPENAI_API_VERSION'],
-    timeout=30.0,
+    timeout=10.0,
     max_retries=0,
 )
 narrator = PersonaNarrator(AzureOpenAIClient(
@@ -285,12 +294,59 @@ clients receive a deep copy of context so their mutations cannot change evidence
 telemetry contains actual handoffs, generation attempts (excluding fallback),
 critic_feedback, measured latency_ms and SUCCESS/RECOVERED/DEGRADED_FALLBACK status.
 Latency covers orchestration, not HTTP transport/repository lookup. Mock timing
-is not an Azure latency estimate. Refusals and validation errors are recoverable;
-unhandled API/network failures still propagate, without silent offline fallback.
+is not an Azure latency estimate. Refusals, validation failures and sanitized
+transient provider failures enter bounded recovery/fallback. Authentication,
+configuration and programming errors propagate, as detailed below.
 The critic implements specified syntactic/name checks, not universal semantic
 truth verification of free-form narrative.
 
 ## Broadcast Studio UI (Step 5)
+
+### Tactical evidence v1
+
+`TacticalEngine.analyze_with_evidence()` returns the existing four-field analysis
+plus `TacticalEvidence`. `analyze()` retains the existing return type and shape.
+Broadcast alone exposes optional `tactical_evidence` (default null for older JSON),
+with literal version `tactical-evidence-v1`. The legacy intelligence endpoint and
+canonical episode/analysis schemas gain no fields.
+
+Evidence contains:
+
+- `scoring_team`, `key_pass_event_id` and chronological `passes`: successful
+  scoring-team event IDs, absolute timestamps, authors, origin/destination X,
+  counted defender IDs and packing scores. The shared strict-X helper supplies
+  both tactical and broadcast calculations. The zero-packing key remains selected,
+  while breakdown_zone stays null, as before.
+- `inferred_connections`: source pass event ID, immediately following event ID,
+  passer and inferred recipient IDs. Every contributing pass is traceable even
+  when repeated edges collapse in the DiGraph. No recipient is inferred across
+  an intervening rival event or a self-loop.
+- `pivot_scores`: existing NetworkX unweighted normalized directed betweenness
+  scores, dimensionless in [0,1]. For n > 2 the normalization factor is
+  1/((n-1)(n-2)); with fewer nodes all intermediary scores are zero. Values are
+  serialized unrounded. `pivot_tied_player_ids` lists all exact maximum-score
+  candidates in chronological first-seen order. A zero-score tie is a selection
+  rule, not evidence that a player is an outstanding connector.
+- `cause_rule`: SUCCESSFUL_RECOVERY_WITHIN_10_SECONDS, PACKING_AT_LEAST_3 or
+  DEFAULT_POSITIONAL, alongside `first_event_id` and `duration_sec`. Failed/rival
+  recoveries do not qualify; the recovery rule still precedes packing and includes
+  the exact ten-second boundary. `limitations` describes the static geometry,
+  inferred recipients and heuristic labels in English.
+
+The analyst computes evidence once before narration. A deep copy is included
+in creative context; retry, client mutation and fallback cannot rewrite it.
+The studio's **Why these results?** expander presents full-episode evidence,
+including at earlier replay positions, without recomputing backend analysis.
+Older APIs report evidence unavailable. Accuracy cards and goal summary display
+successful/attempted scoring-team passes alongside the percentage. Difficulty
+keeps its original formula, units and missing-Y behavior.
+
+Offline regression cases include mixed-team events, a rival event interrupting
+recipient inference, failed/rival recoveries, normalized AWAY attacks, failed
+passes in the accuracy denominator, no eligible passes, zero-centrality ties,
+equal timestamps, bilingual narration, retry isolation and old JSON parsing.
+
+### Studio behavior
 
 Launch with `uv run streamlit run src/ui/app.py`. Local mode runs DuckDB and the
 orchestrator in process. `API_BASE_URL` enables the existing API adapter; simulated
