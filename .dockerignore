@@ -1,0 +1,13 @@
+*
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!.python-version
+!README.md
+!src/
+!src/**
+!.streamlit/
+!.streamlit/config.toml
+**/__pycache__/
+**/*.pyc
+**/*.pyo

@@ -59,6 +59,10 @@ are needed for this mode. Backend setup and remote mode are described below.
 
 ## Development setup
 
+For the container build, local two-service setup and the proposed low-cost Azure
+deployment, see [Azure demo deployment](infra/README.md). The deployment starts
+with offline narration and does not require model quota.
+
 Install dependencies and the project as an editable package:
 
 ```sh

@@ -1,0 +1,45 @@
+name: Publish container
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-container
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and publish Linux image
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Build Linux AMD64 image
+        run: docker build --platform linux/amd64 --tag "$IMAGE:$GITHUB_SHA" .
+      - name: Test packaged application offline
+        run: docker run --rm --volume "$GITHUB_WORKSPACE/tests:/app/tests:ro" "$IMAGE:$GITHUB_SHA" python -W error -m unittest discover -s tests -v
+      - name: Check packaged server startup
+        run: docker run --rm --volume "$GITHUB_WORKSPACE/scripts:/app/scripts:ro" "$IMAGE:$GITHUB_SHA" python scripts/check_startup.py
+      - name: Sign in to GitHub Container Registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish verified image
+        run: docker push "$IMAGE:$GITHUB_SHA"
+      - name: Report image reference
+        run: |
+          echo "Published image: $IMAGE:$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Ensure the GHCR package is public before using the credential-free Azure template." >> "$GITHUB_STEP_SUMMARY"
+      - name: Sign out of registry
+        if: always()
+        run: docker logout ghcr.io
