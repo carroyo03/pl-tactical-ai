@@ -24,3 +24,8 @@ dependencies = [
     "streamlit>=1.66.0,<2",
     "uvicorn>=0.28.0",
 ]
+
+[tool.uv]
+# Reviewed compatibility override while Streamlit retains its older Pillow ceiling.
+override-dependencies = ["pillow>=13.0.0,<14"]
+constraint-dependencies = ["certifi>=2026.10.19"]

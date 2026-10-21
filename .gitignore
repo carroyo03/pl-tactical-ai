@@ -24,6 +24,7 @@ build/
 dist/
 
 # Local data and secrets
+.deployment-local/
 data/*
 .env
 .env.*

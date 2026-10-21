@@ -336,10 +336,9 @@ team counts use scoring-team attempts. Percentages are reserved for episode
 pass accuracy. The original invented-player example now triggers repair, or
 validated fallback if the second attempt also fails.
 
-These checks recognize specific English/Spanish constructions; they are not a
-general named-entity recognizer or proof that every paraphrase or nonnumeric
-sentence is true. Single-word or lowercase invented names, indirect/passive
-action paraphrases and broader semantic contradictions can escape the audit.
+These checks validate supported English and Spanish claims within a defined
+scope. They complement scenario-based quality evaluation; they do not establish
+that every generated statement is correct.
 Reviewed bilingual Mock templates
 remain the token-free default; there is no automatic translation dependency.
 
@@ -367,6 +366,9 @@ processes so it cannot spend model tokens. Streamlit rendering and interaction a
 covered separately by AppTest; the health check is not a browser visual test.
 
 Do not expose the paid API publicly before adding authentication and request/cost
-controls. Azure Container Apps hosting has been verified as documented in
+controls. The public deployment keeps paid model selection disabled and adds
+service authentication, bounded processing and operational monitoring. Runtime
+settings and credentials are kept outside version control. Azure Container Apps
+hosting has been verified as documented in
 [the deployment guide](infra/README.md). Real model deployment and provider
 quality/latency evaluation remain pending.

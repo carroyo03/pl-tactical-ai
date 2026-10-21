@@ -66,8 +66,10 @@ Use the image digest reported by the registry for reproducible deployments.
   Streamlit session may keep resources active; maximum replicas is not a spend cap.
 - There is no dedicated compute plan, Azure Container Registry, database server,
   private endpoint, NAT gateway or paid model in this template.
-- Persistent log collection is disabled initially. Application Insights and its
-  ingestion controls will be a separate change, after hosting is verified.
+- Log Analytics collects operational summaries with bounded ingestion and
+  retention. Request content and credentials are not part of application summaries.
+- A monthly budget sends notifications to the configured account contact. The
+  budget uses the subscription billing currency and does not stop resources.
 - Check remaining student credit, the subscription spending limit and budget
   alerts. Alerts do not automatically stop consumption. Cold starts and session
   loss after scaling to zero are expected tradeoffs of this configuration.
@@ -75,16 +77,21 @@ Use the image digest reported by the registry for reproducible deployments.
 ## Preview, then deploy
 
 Install Azure CLI and Bicep, sign in, then substitute the verified public image
-reference below. Resource-group creation itself does not provision the apps.
+reference below. Keep service credentials, operational settings and alert contact
+details in a private parameters file. `.deployment-local/` is ignored by Git and
+is not included in the container image. The template marks private parameters as
+secure. Resource-group creation itself does not provision the apps.
 
 ```sh
 az provider register --namespace Microsoft.App --wait
+az provider register --namespace Microsoft.OperationalInsights --wait
 az bicep install
 az group create --name rg-pl-tactical-demo --location germanywestcentral
 az deployment group what-if \
   --resource-group rg-pl-tactical-demo \
   --template-file infra/main.bicep \
-  --parameters image=ghcr.io/carroyo03/pl-tactical-ai@sha256:REPLACE_WITH_DIGEST
+  --parameters @.deployment-local/azure.parameters.json \
+    image=ghcr.io/carroyo03/pl-tactical-ai@sha256:REPLACE_WITH_DIGEST
 ```
 
 After reviewing the resource changes and the credit budget:
@@ -93,7 +100,8 @@ After reviewing the resource changes and the credit budget:
 az deployment group create \
   --resource-group rg-pl-tactical-demo \
   --template-file infra/main.bicep \
-  --parameters image=ghcr.io/carroyo03/pl-tactical-ai@sha256:REPLACE_WITH_DIGEST
+  --parameters @.deployment-local/azure.parameters.json \
+    image=ghcr.io/carroyo03/pl-tactical-ai@sha256:REPLACE_WITH_DIGEST
 ```
 
 The deployment outputs `studioUrl`. Check the public studio health endpoint,
@@ -106,9 +114,28 @@ The API uses in-memory DuckDB seeded on startup. State is intentionally disposab
 no authored episodes or changes are persisted by this deployment. Single-replica
 operation and single revision mode keep Streamlit session routing simple.
 
-Do not add model credentials to this publicly accessible demo until application
-authentication and request/cost controls are implemented. Internal API ingress
-does not prevent a visitor from triggering model calls through the public studio.
+The public demo keeps paid model selection explicitly disabled. Enabling a paid
+provider requires a separate access and cost review. See the application settings
+and Azure resource configuration for deployment-specific operational values.
+
+## Operations
+
+Dependency maintenance currently includes a narrow Pillow compatibility override
+while Streamlit retains an older version ceiling. The application regression suite
+and Streamlit image rendering were checked with the selected version. Remove the
+override once the upstream dependency range supports it.
+
+Open the demo resource group in the Azure portal. The Log Analytics workspace
+contains the application summaries; use the individual queries in
+[monitoring.kql](monitoring.kql) to inspect outcomes, latency and log volume.
+Container Apps metrics provide resource and replica health. Keep operational
+values and contact details in the private deployment configuration.
+
+The application includes service-to-service authentication, bounded request
+processing, response protections and controlled operational logging. Public
+documentation describes these controls at a high level. This is a demo baseline,
+not a security certification. Budget and ingestion notifications are not an
+instantaneous financial cutoff.
 
 ## Stop the dedicated demo
 

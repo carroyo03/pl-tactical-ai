@@ -8,6 +8,8 @@ RUN uv sync --locked --no-dev --no-editable
 
 FROM python:3.14.2-slim-bookworm@sha256:e87711ef5c86aaeaa7031718a69db79d334d94c545c709583f651b8185870941 AS runtime
 LABEL org.opencontainers.image.source="https://github.com/carroyo03/pl-tactical-ai"
+RUN apt-get update && apt-get install --yes --no-install-recommends nginx-light \
+    && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
@@ -18,5 +20,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 USER app
-EXPOSE 8000 8501
-CMD ["python", "-m", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+EXPOSE 8000 8080
+CMD ["python", "-m", "uvicorn", "src.api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]

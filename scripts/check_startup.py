@@ -2,6 +2,7 @@
 import json
 import os
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,11 +22,14 @@ def read(url):
         return response.read().decode()
 
 
-def check(command, ready_path, verify):
+def check(command, ready_path, verify, *, environment_updates=None):
     selected_port = port()
     command = [part.replace('{port}', str(selected_port)) for part in command]
     environment = {key: value for key, value in os.environ.items()
-                   if not key.startswith('AZURE_OPENAI_') and key != 'API_BASE_URL'}
+                   if not key.startswith('AZURE_OPENAI_') and key not in (
+                       'API_BASE_URL', 'API_SERVICE_TOKEN', 'REQUIRE_API_SERVICE_TOKEN')}
+    for key, value in (environment_updates or {}).items():
+        environment[key] = value.replace('{port}', str(selected_port))
     with tempfile.TemporaryFile(mode='w+') as logs:
         child = subprocess.Popen(command, stdout=logs, stderr=logs, env=environment)
         try:
@@ -65,12 +69,23 @@ def verify_api(base):
     print('API: real HTTP startup, 3 episodes, offline broadcast, legacy contract and reconstruction OK')
 
 
+def verify_gateway(base):
+    with urlopen(base + '/_stcore/health', timeout=2) as response:
+        assert response.read().decode() == 'ok'
+        assert response.headers['X-Content-Type-Options'] == 'nosniff'
+        assert response.headers['X-Frame-Options'] == 'DENY'
+    print('Studio gateway: proxy startup, health and response headers OK')
+
+
 def main():
     check([sys.executable, '-m', 'uvicorn', 'src.api.app:app', '--host', '127.0.0.1',
            '--port', '{port}', '--log-level', 'warning'], '/goals', verify_api)
     check([sys.executable, '-m', 'streamlit', 'run', 'src/ui/app.py', '--server.address', '127.0.0.1',
            '--server.port', '{port}', '--server.headless', 'true', '--browser.gatherUsageStats', 'false'],
           '/_stcore/health', lambda base: print('Streamlit: real HTTP startup and health OK'))
+    if shutil.which('nginx'):
+        check([sys.executable, '-m', 'src.ui.gateway'], '/_stcore/health', verify_gateway,
+              environment_updates={'STUDIO_GATEWAY_PORT': '{port}', 'STUDIO_INTERNAL_PORT': str(port())})
 
 
 if __name__ == '__main__':

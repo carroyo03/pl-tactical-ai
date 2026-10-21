@@ -14,6 +14,7 @@ from src.analytics.tactical_engine import TacticalEngine
 from src.ingest.repository import DuckDBRepository
 from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
+from src.api.security import APISecurityMiddleware, AdmissionControl, SecuritySettings, log_broadcast
 
 DEFAULT_SAMPLE_PATH = Path(__file__).resolve().parents[2] / 'data/raw/sample_goal_episode.json'
 DEFAULT_API_VERSION = '2024-10-21'
@@ -27,8 +28,11 @@ class GoalIntelligenceResponse(StrictModel):
 
 def create_app(
     *, client: LLMClient | None = None, sample_path: str | Path = DEFAULT_SAMPLE_PATH,
+    security: SecuritySettings | None = None,
 ) -> FastAPI:
     """Injected clients are caller-owned; environment-created clients are app-owned."""
+    settings = security if security is not None else SecuritySettings.from_env()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         with ExitStack() as resources:
@@ -47,7 +51,7 @@ def create_app(
                 endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
                 api_key = os.getenv('AZURE_OPENAI_API_KEY', '').strip()
                 deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', '').strip()
-                if endpoint and api_key and deployment:
+                if endpoint and api_key and deployment and os.getenv('DISABLE_PAID_MODELS', '').lower() != 'true':
                     from openai import AzureOpenAI
 
                     sdk = AzureOpenAI(
@@ -65,7 +69,15 @@ def create_app(
             app.state.orchestrator = BroadcastOrchestrator(selected_client)
             yield
 
-    application = FastAPI(title='PL Tactical AI', lifespan=lifespan)
+    application = FastAPI(title='PL Tactical AI', lifespan=lifespan,
+                          docs_url=None if settings.service_token else '/docs',
+                          redoc_url=None if settings.service_token else '/redoc',
+                          openapi_url=None if settings.service_token else '/openapi.json')
+    application.add_middleware(APISecurityMiddleware, control=AdmissionControl(settings))
+
+    @application.get('/health', include_in_schema=False)
+    def health():
+        return {'status': 'ok'}
 
     @application.get('/goals', response_model=list[str])
     def list_goals(request: Request) -> list[str]:
@@ -99,10 +111,12 @@ def create_app(
             episode = request.app.state.repository.get(goal_id)
         except KeyError:
             raise HTTPException(status_code=404, detail='Goal episode not found') from None
-        return request.app.state.orchestrator.run(
+        result = request.app.state.orchestrator.run(
             episode, persona=persona, language=language, focus_player_id=focus_player_id,
             reconstruction=request.app.state.reconstructions.get(goal_id),
         )
+        log_broadcast(settings, result)
+        return result
 
     return application
 

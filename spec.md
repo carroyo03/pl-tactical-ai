@@ -488,8 +488,7 @@ detector or semantic verifier are introduced.
 Adversarial offline tests cover unknown actors/recipients, wrong action authors,
 failed recoveries, false passing connections, passive goal attribution, numeric
 scope errors and fallback. Positive cases cover truthful bilingual statements,
-source-name variations and existing persona templates. Unsupported paraphrases,
-lowercase/single-word invented names and arbitrary semantic claims can still
+source-name variations and existing persona templates. Claims outside the supported validation scope can still
 pass; these checks must not be advertised as zero hallucination.
 
 ### Provider and recovery baseline
@@ -499,10 +498,9 @@ pass; these checks must not be advertised as zero hallucination.
   allowed numeric values (0/1/2 decimal rounding), exact zone labels, and selected
   known-player pivot/scorer/key-pass constructions. Digit-bearing player names
   are preserved. Physical distance/speed units are rejected because no such
-  measurements exist. Number words are supported from zero to twenty. Negation,
-  arbitrary paraphrases, unrecognized role phrasing, invented proper names and
-  broader semantic truth are not comprehensively validated; do not advertise
-  zero hallucination for free creative text.
+  measurements exist. Number words are supported from zero to twenty. Validation is bounded
+  to supported constructions; it is not a universal semantic verifier. Do not
+  advertise zero hallucination for free creative text.
 - The same Pydantic audit applies to direct narration and critic validation.
   Broadcast metrics are passed into narrator preparation once; facts are never
   recomputed to fit rejected drafts. Invalid explicit claims trigger one real
@@ -527,3 +525,23 @@ pass; these checks must not be advertised as zero hallucination.
   reproduces the lockfile. Tests generate their own canonical fixtures and require
   no ignored `data/raw` files. `scripts/check_startup.py` checks real loopback
   server startup without Azure credentials or persistent child processes.
+
+
+## Operational baseline
+
+The public demo remains accessible without a user login and uses offline narration.
+The hosted API requires a private service credential, preserves its response
+contracts and exposes an independent readiness endpoint. Request processing is
+bounded per process; overload responses are handled as a temporary busy state.
+The studio runs behind a supervised gateway, with native Streamlit protections
+retained. Deployment-specific capacity values are private parameters.
+
+Operational summaries record typed outcomes, attempts, provider, latency and
+aggregated service status, without narrative text, request parameters or credentials.
+Log Analytics applies bounded ingestion and retention; a resource-group budget
+sends notifications using the subscription billing currency. Notifications do not
+stop resources automatically. Paid provider selection stays disabled in the demo.
+
+Regression tests cover service credentials, readiness, admission recovery, input
+bounds, privacy of summaries and disabled paid-provider selection. The container
+startup check verifies gateway readiness and response protections.

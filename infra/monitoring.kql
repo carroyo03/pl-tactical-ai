@@ -1,0 +1,24 @@
+// Recent application outcomes, without narrative text or participant details.
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| extend record = parse_json(Log_s)
+| where tostring(record.event) == 'broadcast_complete'
+| summarize Requests = count(),
+            AverageLatencyMs = avg(todouble(record.latency_ms)),
+            P95LatencyMs = percentile(todouble(record.latency_ms), 95)
+    by Status = tostring(record.status), Provider = tostring(record.provider)
+
+// Aggregated HTTP service health.
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| extend record = parse_json(Log_s)
+| where tostring(record.event) == 'api_window'
+| summarize Successful = sum(toint(record.counts['2xx'])),
+            ClientResponses = sum(toint(record.counts['4xx'])),
+            ServerResponses = sum(toint(record.counts['5xx']))
+    by bin(TimeGenerated, 15m)
+
+// Actual billable log volume; caps and free allowances are account-dependent.
+Usage
+| where TimeGenerated > ago(30d) and IsBillable == true
+| summarize IngestedGB = sum(Quantity) / 1000 by DataType

@@ -1,9 +1,12 @@
 """Studio data access and clearly labelled, deterministic recovery demonstrations."""
 import json
+import os
+from contextlib import contextmanager
+from functools import lru_cache
 from typing import Literal
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
@@ -14,6 +17,7 @@ from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
 from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.ingest.repository import DuckDBRepository
 from src.ui.demos import DemoLLMClient, DemoReview, RejectedDraft, available_demo_errors
+from src.api.security import AdmissionControl, SecuritySettings
 
 DemoMode = Literal['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
 DEMO_MODES = ['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
@@ -21,6 +25,26 @@ DEMO_MODES = ['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> F
 
 class StudioServiceError(ValueError):
     """Actionable data-source failure safe to display in the studio."""
+
+
+@lru_cache(maxsize=4)
+def _studio_admission(limit, inflight):
+    return AdmissionControl(SecuritySettings(requests_per_minute=limit, max_inflight=inflight))
+
+
+@contextmanager
+def studio_capacity():
+    limit = int(os.getenv('STUDIO_REQUESTS_PER_MINUTE', '0'))
+    if not limit:
+        yield
+        return
+    control = _studio_admission(limit, int(os.getenv('STUDIO_MAX_INFLIGHT', '2')))
+    if control.acquire():
+        raise StudioServiceError('The studio is busy right now. Please wait a moment and try again.')
+    try:
+        yield
+    finally:
+        control.release()
 
 
 def parse_broadcast(payload: dict, *, persona: str, language: str) -> BroadcastResponse:
@@ -41,9 +65,15 @@ class StudioService:
 
     def _request(self, path: str) -> object:
         try:
-            with urlopen(self.api_base_url + path, timeout=35) as response:
+            headers = {}
+            if token := os.getenv('API_SERVICE_TOKEN'):
+                headers['X-API-Service-Token'] = token
+            request = Request(self.api_base_url + path, headers=headers)
+            with urlopen(request, timeout=35) as response:
                 return json.load(response)
         except HTTPError as error:
+            if error.code in (429, 503):
+                raise StudioServiceError('The studio is busy right now. Please wait a moment and try again.') from error
             raise StudioServiceError(f'API returned HTTP {error.code}. Check the selected episode and API configuration.') from error
         except (URLError, TimeoutError, OSError) as error:
             raise StudioServiceError('Cannot reach the API. Start the backend or unset API_BASE_URL for local mode.') from error
@@ -73,6 +103,12 @@ class StudioService:
     def broadcast(self, episode: GoalEpisode, *, persona='TACTICAL_ANALYST', language='en',
                   focus_player_id: str | None = None, mode: DemoMode = 'Normal',
                   demo_error: str = 'invented_player') -> BroadcastResponse:
+        with studio_capacity():
+            return self._broadcast(episode, persona=persona, language=language,
+                                   focus_player_id=focus_player_id, mode=mode, demo_error=demo_error)
+
+    def _broadcast(self, episode: GoalEpisode, *, persona, language, focus_player_id, mode,
+                   demo_error) -> BroadcastResponse:
         self.demo_review = None
         if mode not in DEMO_MODES:
             raise ValueError('Unknown demo mode')

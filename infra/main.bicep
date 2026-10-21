@@ -10,14 +10,77 @@ param location string = 'germanywestcentral'
 @maxLength(20)
 param namePrefix string = 'pl-tactical-demo'
 
+@secure()
+@minLength(32)
+param serviceToken string
+
+@secure()
+param operatingLimits object
+
+@secure()
+param budgetAlertEmail string
+
+@description('Budget amount in the billing currency of the Azure subscription.')
+param monthlyBudgetAmount int = 10
+
+param budgetStartDate string = utcNow('yyyy-MM-01')
+
 var apiName = '${namePrefix}-api'
 var studioName = '${namePrefix}-studio'
+
+resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: '${namePrefix}-logs'
+  location: location
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+    workspaceCapping: {
+      dailyQuotaGb: operatingLimits.logDailyGb
+    }
+  }
+}
+
+resource budget 'Microsoft.Consumption/budgets@2024-08-01' = {
+  name: '${namePrefix}-budget'
+  properties: {
+    amount: monthlyBudgetAmount
+    category: 'Cost'
+    timeGrain: 'Monthly'
+    timePeriod: {
+      startDate: '${budgetStartDate}T00:00:00Z'
+    }
+    notifications: {
+      approaching: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 80
+        thresholdType: 'Actual'
+        contactEmails: [budgetAlertEmail]
+      }
+      reached: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 100
+        thresholdType: 'Actual'
+        contactEmails: [budgetAlertEmail]
+      }
+    }
+  }
+}
 
 resource environment 'Microsoft.App/managedEnvironments@2025-01-01' = {
   name: '${namePrefix}-env'
   location: location
   properties: {
-    appLogsConfiguration: {}
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: workspace.properties.customerId
+        sharedKey: workspace.listKeys().primarySharedKey
+      }
+    }
     workloadProfiles: [
       {
         name: 'Consumption'
@@ -36,6 +99,12 @@ resource api 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: [
+        {
+          name: 'api-service-token'
+          value: serviceToken
+        }
+      ]
       ingress: {
         external: false
         targetPort: 8000
@@ -48,6 +117,14 @@ resource api 'Microsoft.App/containerApps@2025-01-01' = {
         {
           name: 'api'
           image: image
+          env: [
+            { name: 'API_SERVICE_TOKEN', secretRef: 'api-service-token' }
+            { name: 'REQUIRE_API_SERVICE_TOKEN', value: 'true' }
+            { name: 'DISABLE_PAID_MODELS', value: 'true' }
+            { name: 'STRUCTURED_LOGS', value: 'true' }
+            { name: 'API_REQUESTS_PER_MINUTE', value: string(operatingLimits.apiRequestsPerMinute) }
+            { name: 'API_MAX_INFLIGHT', value: string(operatingLimits.apiMaxInflight) }
+          ]
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
@@ -56,7 +133,7 @@ resource api 'Microsoft.App/containerApps@2025-01-01' = {
             {
               type: 'Readiness'
               httpGet: {
-                path: '/goals'
+                path: '/health'
                 port: 8000
                 scheme: 'HTTP'
               }
@@ -83,9 +160,15 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      secrets: [
+        {
+          name: 'api-service-token'
+          value: serviceToken
+        }
+      ]
       ingress: {
         external: true
-        targetPort: 8501
+        targetPort: 8080
         transport: 'http'
         allowInsecure: false
       }
@@ -98,19 +181,14 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
           command: [
             'python'
             '-m'
-            'streamlit'
-          ]
-          args: [
-            'run'
-            'src/ui/app.py'
-            '--server.address'
-            '0.0.0.0'
-            '--server.port'
-            '8501'
-            '--server.headless'
-            'true'
+            'src.ui.gateway'
           ]
           env: [
+            { name: 'API_SERVICE_TOKEN', secretRef: 'api-service-token' }
+            { name: 'STUDIO_REQUEST_RATE', value: string(operatingLimits.studioRequestRate) }
+            { name: 'STUDIO_CONNECTION_LIMIT', value: string(operatingLimits.studioConnections) }
+            { name: 'STUDIO_REQUESTS_PER_MINUTE', value: string(operatingLimits.studioRequestsPerMinute) }
+            { name: 'STUDIO_MAX_INFLIGHT', value: string(operatingLimits.studioMaxInflight) }
             {
               name: 'API_BASE_URL'
               value: 'https://${api.properties.configuration.ingress.fqdn}'
@@ -125,7 +203,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
               type: 'Readiness'
               httpGet: {
                 path: '/_stcore/health'
-                port: 8501
+                port: 8080
                 scheme: 'HTTP'
               }
               periodSeconds: 10
@@ -145,3 +223,4 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
 
 output studioUrl string = 'https://${studio.properties.configuration.ingress.fqdn}'
 output apiInternalUrl string = 'https://${api.properties.configuration.ingress.fqdn}'
+output monitoringWorkspaceId string = workspace.id

@@ -3,26 +3,34 @@ services:
   api:
     build: .
     image: pl-tactical-ai:local
+    mem_limit: 512m
+    cpus: 0.25
+    environment:
+      API_SERVICE_TOKEN: ${API_SERVICE_TOKEN:-}
+      DISABLE_PAID_MODELS: "true"
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/goals', timeout=2)"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health', timeout=2)"]
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 15s
   studio:
     image: pl-tactical-ai:local
+    mem_limit: 512m
+    cpus: 0.25
     depends_on:
       api:
         condition: service_healthy
-    command: ["python", "-m", "streamlit", "run", "src/ui/app.py", "--server.address", "0.0.0.0", "--server.port", "8501", "--server.headless", "true"]
+    command: ["python", "-m", "src.ui.gateway"]
     environment:
       API_BASE_URL: http://api:8000
+      API_SERVICE_TOKEN: ${API_SERVICE_TOKEN:-}
     ports:
-      - "127.0.0.1:${STUDIO_PORT:-8501}:8501"
+      - "127.0.0.1:${STUDIO_PORT:-8501}:8080"
     healthcheck:
-      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8501/_stcore/health', timeout=2)"]
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8080/_stcore/health', timeout=2)"]
       interval: 5s
       timeout: 3s
       retries: 12
