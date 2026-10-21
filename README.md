@@ -2,6 +2,63 @@
 
 [![CI](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml)
 
+PL Tactical AI is an explainable football analysis and commentary prototype for
+analysts and broadcast teams. It turns structured goal-sequence events into an
+interactive tactical replay and a personalized explanation of how the move unfolded.
+It helps answer three questions: **Which pass stands out, who connects the attack,
+and what evidence supports that interpretation?**
+
+The Broadcast Studio lets you explore three fictional goal sequences, jump between
+key events, inspect timed overlays and read commentary in English or Spanish.
+Commentary can be tailored to a tactical analyst, a passionate fan or a casual
+viewer, with an optional focus on a participating player.
+
+## How it works
+
+1. **Establish the facts.** The Tactical Analyst calculates pass metrics, identifies
+   the highlighted pass and builds an inferred passing network from the events.
+2. **Explain the play.** The Persona Narrator prepares commentary using those facts
+   and the selected language, style and player focus.
+3. **Check the explanation.** The Guardrail Critic validates supported claims and
+   output requirements. A rejected draft can be retried once; if both attempts
+   fail, a validated offline fallback is used. Tactical facts stay unchanged.
+
+The interface exposes the evidence behind the analysis and includes selectable
+local review scenarios. These deliberately introduce mistakes so the rejection,
+correction and fallback paths can be inspected step by step.
+
+## Current scope
+
+- **Synthetic data only:** fictional players and authored football events, with no
+  real Premier League match data or video event detection.
+- **Episode-level analysis:** goal sequences and their explanations, rather than
+  full-match recaps or a live match feed.
+- **Explicit measurement limits:** packing compares a pass with a static defensive
+  snapshot; passing connections are inferred; difficulty is a heuristic score,
+  not a calibrated completion probability.
+- **Works without cloud credentials:** the default narrator uses reviewed offline
+  templates. An Azure OpenAI adapter is implemented, but a real Azure model
+  deployment and its quality, latency and cost remain to be validated.
+
+The application combines **Python, FastAPI, Streamlit, DuckDB, NetworkX, Plotly
+and Pydantic**, with a custom three-role orchestration workflow. The offline mode
+supports reproducible development and demonstrations without model API calls.
+
+## Quick start
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run from
+the project root:
+
+```sh
+uv sync --locked
+uv run streamlit run src/ui/app.py
+```
+
+Open the local URL printed by Streamlit and select a play. No Azure credentials
+are needed for this mode. Backend setup and remote mode are described below.
+
+## Development setup
+
 Install dependencies and the project as an editable package:
 
 ```sh
