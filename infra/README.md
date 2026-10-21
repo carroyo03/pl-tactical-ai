@@ -5,6 +5,27 @@ Consumption environment, an internally exposed FastAPI app and a publicly expose
 Streamlit app. Both apps use the same verified Linux AMD64 image. It does not
 deploy a language model or configure Foundry orchestration.
 
+## Deployed demo
+
+The demo is hosted in `rg-pl-tactical-demo` in Germany West Central:
+
+- [Broadcast Studio](https://pl-tactical-demo-studio.happyhill-6f6f935b.germanywestcentral.azurecontainerapps.io)
+- API: internal ingress only, within the same Container Apps environment.
+- Narration: offline mock; no model credentials or paid model requests.
+- Image: `ghcr.io/carroyo03/pl-tactical-ai@sha256:4207265fdb4c58456762deab4fced3623976e9f32ee2f67c1ae5b7e04c08518d`.
+
+Azure provisioned an Express environment. Sticky-session configuration is omitted
+because Express does not support it; the studio is limited to one replica.
+Revisit session handling before increasing that limit.
+
+Verified on 2026-10-21: both Azure apps provisioned successfully; the public studio
+health endpoint returned `ok`; the studio container retrieved all three episodes
+through the internal API, generated English and Spanish commentary with participating
+player focus, and exercised critic recovery and fallback. The image passed all 86
+offline tests and real server startup checks in GitHub Actions. The application
+process runs as UID 10001. A deployed browser visual review and real model quality,
+latency and cost evaluation are still pending.
+
 ## Local verification
 
 ```sh

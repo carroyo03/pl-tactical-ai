@@ -2,6 +2,10 @@
 
 [![CI](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml)
 
+**[Open the Azure demo](https://pl-tactical-demo-studio.happyhill-6f6f935b.germanywestcentral.azurecontainerapps.io)**
+— fictional goal sequences with offline narration. The app can scale to zero, so
+the first visit may take longer to load.
+
 PL Tactical AI is an explainable football analysis and commentary prototype for
 analysts and broadcast teams. It turns structured goal-sequence events into an
 interactive tactical replay and a personalized explanation of how the move unfolded.
@@ -363,5 +367,6 @@ processes so it cannot spend model tokens. Streamlit rendering and interaction a
 covered separately by AppTest; the health check is not a browser visual test.
 
 Do not expose the paid API publicly before adding authentication and request/cost
-controls. This repository has not yet demonstrated a real Azure deployment or
-provider quality/latency evaluation.
+controls. Azure Container Apps hosting has been verified as documented in
+[the deployment guide](infra/README.md). Real model deployment and provider
+quality/latency evaluation remain pending.

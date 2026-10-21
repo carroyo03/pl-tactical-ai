@@ -88,9 +88,6 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
         targetPort: 8501
         transport: 'http'
         allowInsecure: false
-        stickySessions: {
-          affinity: 'sticky'
-        }
       }
     }
     template: {
