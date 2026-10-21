@@ -125,8 +125,23 @@ p {line-height:1.55; max-width:76ch;}
 .st-key-telemetry .retry-loop, .st-key-telemetry .critic-box {margin:0;}
 .st-key-telemetry button {min-height:44px;padding:var(--space-8) var(--space-16);}
 .st-key-editorial_domain {padding-top:16px;}
-.st-key-telemetry_domain {padding-top:24px;padding-bottom:16px;}
-.st-key-handoff_panel, .st-key-overlay_history {padding-top:16px;}
+.st-key-telemetry_domain {padding-top:4px;padding-bottom:0;}
+/* Keep disclosures adjacent when stacked; align their top edges only in two-column mode. */
+@media(min-width:1181px) {
+ .st-key-studio_domains [data-testid="stHorizontalBlock"]:has(.st-key-tactical_domain) {align-items:stretch;}
+ .st-key-studio_domains [data-testid="stColumn"]:is(:has(.st-key-tactical_domain), :has(.st-key-editorial_domain)) {
+  display:flex;flex-direction:column;align-self:stretch;
+ }
+ /* Streamlit places a layout wrapper between each column and its vertical block. */
+ .st-key-studio_domains [data-testid="stColumn"]:is(:has(.st-key-tactical_domain), :has(.st-key-editorial_domain)) > div {
+  display:flex;flex-direction:column;flex:1 1 auto;
+ }
+ .st-key-studio_domains [data-testid="stColumn"]:is(:has(.st-key-tactical_domain), :has(.st-key-editorial_domain)) > div > [data-testid="stVerticalBlock"] {
+  flex:1 1 auto;
+ }
+ .st-key-overlay_history, .st-key-technical_details {margin-top:auto;}
+}
+
 .verified-grounds {padding-bottom:8px;}
 .agent-stage {padding:16px;}
 @container (max-width:1100px) {
@@ -317,6 +332,7 @@ def main() -> None:
         left, right = st.columns([1.65, 1], gap='medium')
     with left:
         tactical_slot = st.container(key='tactical_domain')
+        history_slot = st.container(key='overlay_history')
     with right:
         st.markdown('<h2 class="section-heading">Why this goal happened</h2>', unsafe_allow_html=True)
         with st.container(key='narrative_controls'):
@@ -345,6 +361,7 @@ def main() -> None:
                                            format_func=DEMO_ERRORS.get)
                 st.caption('This demonstration runs locally. An incorrect draft is deliberately introduced so the critic’s response can be inspected.')
         telemetry_slot = st.container(key='telemetry_domain')
+        technical_slot = st.container(key='technical_details')
     # Session state survives script reruns; template edits must refresh cached text.
     template_revision = sha256(
         Path(narrator_module.__file__).read_bytes()
@@ -456,11 +473,6 @@ def main() -> None:
             html_card('No metric is triggered at this event. Select the Key pass milestone to see the pass overlays.', 'overlay history')
         for item in active_overlays:
             render_overlay(item)
-        if history:
-            with st.container(key='overlay_history'):
-                with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
-                    for item in reversed(history):
-                        render_overlay(item)
     with editorial_slot:
         focus = result.focus
         focus_text = ('Whole team' if focus.player_id is None else
@@ -487,14 +499,7 @@ def main() -> None:
                 with st.expander(title, expanded=False):
                     st.markdown(body)
     with telemetry_slot:
-        outcome = {'SUCCESS': 'Accepted', 'RECOVERED': 'Recovered after retry',
-                   'DEGRADED_FALLBACK': 'Safe fallback'}[status]
         with st.container(key='telemetry'):
-            with st.container(border=True):
-                st.markdown(f'**{outcome}**')
-                st.caption('The first draft passed validation.' if status == 'SUCCESS' else
-                           'The corrected second draft passed validation.' if status == 'RECOVERED' else
-                           'A validated offline fallback was used.')
             with st.expander('Step-by-step explanation', expanded=False):
                 with st.container(border=True, key='review_facts'):
                     st.markdown('**1. The facts were established**')
@@ -526,24 +531,30 @@ def main() -> None:
                                     'It passed validation and is displayed above.')
                     else:
                         st.markdown('The accepted first draft is displayed above. No correction or fallback was needed.')
-            with st.expander('Technical details', expanded=False):
-                st.caption('This walkthrough shows recorded steps and validation results. The implemented checks have a limited scope.')
-                st.markdown(f'**Generator:** {generation_provider}')
-                st.markdown(f'**Drafts requested:** {telemetry.attempts}  \n'
-                            f'**Recorded handoffs:** {len(telemetry.handoffs)}  \n'
-                            f'**Orchestration latency:** {telemetry.latency_ms:.2f} ms')
-                st.caption('Local simulation timing does not represent Azure model latency.'
-                           if simulated else f'Execution source: {source}.')
-                if telemetry.critic_feedback:
-                    st.markdown('**Validator feedback**')
-                    for number, feedback in enumerate(telemetry.critic_feedback, 1):
-                        st.caption(f'Draft {number}')
-                        st.code(feedback, language=None, wrap_lines=True)
-                st.markdown('**Recorded handoffs**')
-                for handoff in telemetry.handoffs:
-                    st.markdown(f'**Attempt {handoff.attempt}:** '
-                                f'{handoff.from_agent} → {handoff.to_agent}')
-                    st.text(handoff.reason)
+    with history_slot:
+        if history:
+            with st.expander(f'Earlier overlays ({len(history)})', expanded=False):
+                for item in reversed(history):
+                    render_overlay(item)
+    with technical_slot:
+        with st.expander('Technical details', expanded=False):
+            st.caption('This walkthrough shows recorded steps and validation results. The implemented checks have a limited scope.')
+            st.markdown(f'**Generator:** {generation_provider}')
+            st.markdown(f'**Drafts requested:** {telemetry.attempts}  \n'
+                        f'**Recorded handoffs:** {len(telemetry.handoffs)}  \n'
+                        f'**Orchestration latency:** {telemetry.latency_ms:.2f} ms')
+            st.caption('Local simulation timing does not represent Azure model latency.'
+                       if simulated else f'Execution source: {source}.')
+            if telemetry.critic_feedback:
+                st.markdown('**Validator feedback**')
+                for number, feedback in enumerate(telemetry.critic_feedback, 1):
+                    st.caption(f'Draft {number}')
+                    st.code(feedback, language=None, wrap_lines=True)
+            st.markdown('**Recorded handoffs**')
+            for handoff in telemetry.handoffs:
+                st.markdown(f'**Attempt {handoff.attempt}:** '
+                            f'{handoff.from_agent} → {handoff.to_agent}')
+                st.text(handoff.reason)
 
 
 if __name__ == '__main__':
