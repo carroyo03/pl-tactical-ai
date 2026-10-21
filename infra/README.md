@@ -12,7 +12,7 @@ The demo is hosted in `rg-pl-tactical-demo` in Germany West Central:
 - [Broadcast Studio](https://pl-tactical-demo-studio.happyhill-6f6f935b.germanywestcentral.azurecontainerapps.io)
 - API: internal ingress only, within the same Container Apps environment.
 - Narration: offline mock; no model credentials or paid model requests.
-- Image: `ghcr.io/carroyo03/pl-tactical-ai@sha256:4207265fdb4c58456762deab4fced3623976e9f32ee2f67c1ae5b7e04c08518d`.
+- Image: `ghcr.io/carroyo03/pl-tactical-ai@sha256:27f178ebf898f92abf530f7a642a85bfbc4e63ae352a528a1101319c519f38c4`.
 
 Azure provisioned an Express environment. Sticky-session configuration is omitted
 because Express does not support it; the studio is limited to one replica.
@@ -21,10 +21,16 @@ Revisit session handling before increasing that limit.
 Verified on 2026-10-21: both Azure apps provisioned successfully; the public studio
 health endpoint returned `ok`; the studio container retrieved all three episodes
 through the internal API, generated English and Spanish commentary with participating
-player focus, and exercised critic recovery and fallback. The image passed all 86
+player focus, and exercised critic recovery and fallback. The image passed all 95
 offline tests and real server startup checks in GitHub Actions. The application
 process runs as UID 10001. A deployed browser visual review and real model quality,
 latency and cost evaluation are still pending.
+
+The operational update was also deployed and checked on 2026-10-21. The internal
+API requires service authentication, the public studio returns the configured
+response protections, and Log Analytics received application outcome and latency
+summaries. The monthly resource-group budget is configured at EUR 10 with email
+notifications. Notification delivery has not been exercised with actual spend.
 
 ## Local verification
 
