@@ -8,6 +8,7 @@ import streamlit as st
 
 from src.agents import narrator as narrator_module
 from src.ui.service import DEMO_MODES, StudioService, StudioServiceError
+from src.ui.demos import DEMO_ERRORS, DemoReview, available_demo_errors, explain_critic_feedback
 from src.ui.visualization import (
     build_analysis_explanations, build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
 )
@@ -116,7 +117,7 @@ p {line-height:1.55; max-width:76ch;}
 .st-key-play_navigation {padding:0;margin:0 0 24px;}
 .section-heading {margin:var(--space-24) 0 10px !important;padding:0 !important;line-height:1.5;}
 /* Native gaps own telemetry spacing; nested cards do not add a second margin. */
-.st-key-telemetry {gap:0 !important;}
+
 .st-key-telemetry [data-testid="stMarkdownContainer"] {display:flow-root;}
 .telemetry-stack {display:flex !important;flex-direction:column !important;gap:14px !important;margin-bottom:14px !important;}
 .telemetry-stack > * {margin:0 !important;}
@@ -245,33 +246,27 @@ def render_overlay(item) -> None:
     )
 
 
-def render_pipeline(telemetry, summary_html: str) -> None:
-    """Show completed execution evidence, not a simulated live processing animation."""
-    recovered = telemetry.status == 'RECOVERED'
-    fallback = telemetry.status == 'DEGRADED_FALLBACK'
-    labels = [
-        ('1. Tactical Analyst', 'Facts ready'),
-        ('2. Persona Narrator', 'Drafts rejected' if fallback else 'Repaired' if recovered else 'Draft accepted'),
-        ('3. Guardrail Critic', 'Fallback validated' if fallback else 'Accepted'),
-    ]
-    stages = '<span class="pipeline-arrow" aria-hidden="true">→</span>'.join(
-        f'<div class="agent-stage"><strong>{label}</strong><span class="agent-state">{state}</span></div>'
-        for label, state in labels
-    )
-    blocks = [f'<div class="pipeline" aria-label="Completed agent execution">{stages}</div>', summary_html]
-    has_return = any(h.from_agent == 'GuardrailCriticAgent' and h.to_agent == 'PersonaNarratorAgent'
-                     for h in telemetry.handoffs)
-    if has_return:
-        blocks.append('<div class="retry-loop">↩ Critic → Narrator / repair requested / '
-                      'second generation attempt completed</div>')
-    if telemetry.critic_feedback:
+def render_critic_review(telemetry, review: DemoReview | None) -> None:
+    """Explain recorded rejections inline within the guided review."""
+    if not telemetry.critic_feedback:
+        return
+    if review is not None:
+        st.caption('These drafts were deliberately made incorrect for this local demonstration. They were not published as commentary.')
+        for index, draft in enumerate(review.rejected_drafts, 1):
+            with st.container(border=True):
+                st.markdown(f'**Draft {index} was rejected**')
+                st.markdown('**What was written**')
+                st.text(draft.headline)
+                st.text(draft.commentary)
+                st.markdown('**Why a correction was needed**')
+                st.text(explain_critic_feedback(draft.feedback))
+        st.divider()
+        st.markdown('**What the recorded events support**')
+        st.text(review.evidence_explanation)
+    else:
         for number, feedback in enumerate(telemetry.critic_feedback, 1):
-            blocks.append(f'<div class="critic-box" role="status"><strong>Draft {number} rejected by the critic</strong>'
-                        '<p>The draft failed a grounding or output rule. '
-                        'The reason below was recorded before requesting a repair or producing the safe fallback.</p>'
-                        f'<pre>{escape(feedback)}</pre></div>')
-    st.markdown('<div class="telemetry-stack" style="display:flex;flex-direction:column;gap:14px;margin-bottom:14px;">'
-                + ''.join(blocks) + '</div>', unsafe_allow_html=True)
+            st.markdown(f'**Draft {number} was rejected**')
+            st.text(explain_critic_feedback(feedback))
 
 
 def main() -> None:
@@ -287,7 +282,7 @@ def main() -> None:
                 st.markdown('Use **Choose a play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
                             'to inspect that moment; the final **Goal shot** milestone shows the complete sequence. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
-                            'Use **Agent behavior** beside the telemetry diagram to demonstrate a clean run, critic recovery or safe fallback.')
+                            'Open **Test a review scenario** below the commentary to demonstrate a clean run, critic recovery or safe fallback.')
                 st.markdown('The pitch shows authored synthetic positions at each event: eleven opponents '
                             'and the participating attackers. At the key pass, crosses show the separate '
                             'five-defender static reference used for packing. These positions are illustrative; '
@@ -332,20 +327,29 @@ def main() -> None:
             focus_id = narrative_controls[2].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
                                     format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
         editorial_slot = st.container(key='editorial_domain')
-        st.markdown('<h2 class="section-heading">Multi-agent telemetry</h2>', unsafe_allow_html=True)
-        with st.container(key='agent_controls'):
+        st.markdown('<h2 class="section-heading">Test a review scenario</h2>', unsafe_allow_html=True)
+        with st.container(key='agent_controls', border=True):
             behavior_labels = dict(zip(DEMO_MODES, [
-                'Clean run (first-pass success)',
-                'Single mistake (critic recovers)',
-                'Repeated mistake (safe fallback)',
+                'Generate commentary normally',
+                'The first draft is rejected and corrected',
+                'Both drafts are rejected and a fallback is used',
             ]))
             mode = st.selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
                                          format_func=behavior_labels.get)
+            demo_error = None
+            if mode != 'Normal':
+                options = available_demo_errors(episode)
+                if st.session_state.get('demo_error') not in options:
+                    st.session_state['demo_error'] = options[0]
+                demo_error = st.selectbox('What should go wrong in the draft?', options, key='demo_error',
+                                           format_func=DEMO_ERRORS.get)
+                st.caption('This demonstration runs locally. An incorrect draft is deliberately introduced so the critic’s response can be inspected.')
         telemetry_slot = st.container(key='telemetry_domain')
     # Session state survives script reruns; template edits must refresh cached text.
     template_revision = sha256(
         Path(narrator_module.__file__).read_bytes()
         + Path(__file__).with_name('service.py').read_bytes()
+        + Path(__file__).with_name('demos.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'ingest/mock_generator.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'agents/orchestrator.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'agents/grounding.py').read_bytes()
@@ -355,14 +359,16 @@ def main() -> None:
         + (Path(__file__).resolve().parents[1] / 'analytics/evidence.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'analytics/broadcast.py').read_bytes()
     ).hexdigest()
-    key = (episode_key, persona, language, focus_id, mode, template_revision)
+    key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision)
     try:
         cached = st.session_state.get('_broadcast')
         if (st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction')
                 or not hasattr(cached, 'tactical_evidence') or not hasattr(cached.telemetry, 'narrative_provider')):
             st.session_state['_broadcast'] = service.broadcast(
                 episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
+                demo_error=demo_error or 'invented_player',
             )
+            st.session_state['_demo_review'] = service.demo_review
             st.session_state['_result_key'] = key
         result = st.session_state['_broadcast']
     except StudioServiceError as error:
@@ -484,19 +490,60 @@ def main() -> None:
         outcome = {'SUCCESS': 'Accepted', 'RECOVERED': 'Recovered after retry',
                    'DEGRADED_FALLBACK': 'Safe fallback'}[status]
         with st.container(key='telemetry'):
-            render_pipeline(telemetry, f'<div class="bento"><strong>{outcome}</strong>'
-                      f'<p>{telemetry.attempts} generation attempts / {len(telemetry.handoffs)} handoffs</p>'
-                      f'<div class="caption">Generator: {generation_provider}<br>Orchestration latency: {telemetry.latency_ms:.2f} ms / '
-                      f'{"Local simulation" if simulated else escape(source)}</div></div>')
-            with st.container(key='handoff_panel'):
-                with st.expander('Inspect agent handoffs', expanded=simulated):
-                    cards = ''.join(
-                        f'<div class="bento handoff-card"><div class="caption">Attempt {handoff.attempt}</div>'
-                        f'<div class="handoff-route">{escape(handoff.from_agent)} → {escape(handoff.to_agent)}</div>'
-                        f'<p class="caption">{escape(handoff.reason)}</p></div>'
-                        for handoff in telemetry.handoffs
+            with st.container(border=True):
+                st.markdown(f'**{outcome}**')
+                st.caption('The first draft passed validation.' if status == 'SUCCESS' else
+                           'The corrected second draft passed validation.' if status == 'RECOVERED' else
+                           'A validated offline fallback was used.')
+            with st.expander('Step-by-step explanation', expanded=False):
+                with st.container(border=True, key='review_facts'):
+                    st.markdown('**1. The facts were established**')
+                    st.caption('Tactical Analyst')
+                    st.markdown(
+                        f'The synthetic events were analysed, and **{pivot}** was selected as the key connector.'
+                        if analysis.tactical_pivot else
+                        'The synthetic events were analysed. No key connector could be identified from the available passing connections.'
                     )
-                    st.markdown(f'<div class="handoff-list">{cards}</div>', unsafe_allow_html=True)
+                    st.markdown('These facts were kept unchanged throughout the review.')
+                with st.container(border=True, key='review_checks'):
+                    st.markdown('**2. A draft was prepared and checked**')
+                    st.caption('Persona Narrator → Guardrail Critic')
+                    st.markdown('A draft was prepared using the selected style, language and player focus. '
+                                'Its participant names, event claims, numbers and required format were then checked.')
+                    if telemetry.critic_feedback:
+                        render_critic_review(telemetry, st.session_state.get('_demo_review') if simulated else None)
+                    else:
+                        st.markdown('**No rejection was recorded.** The first draft passed the implemented checks.')
+                with st.container(border=True, key='review_selection'):
+                    st.markdown('**3. The final commentary was selected**')
+                    if status == 'RECOVERED':
+                        st.markdown('The rejection feedback was returned to the Persona Narrator. '
+                                    'A second draft was generated from the same facts and passed validation.')
+                        st.markdown('The corrected commentary is displayed above.')
+                    elif status == 'DEGRADED_FALLBACK':
+                        st.markdown('Both drafts were rejected. No further generation was attempted.')
+                        st.markdown('An offline fallback was assembled from verified participant names and tactical facts. '
+                                    'It passed validation and is displayed above.')
+                    else:
+                        st.markdown('The accepted first draft is displayed above. No correction or fallback was needed.')
+            with st.expander('Technical details', expanded=False):
+                st.caption('This walkthrough shows recorded steps and validation results. The implemented checks have a limited scope.')
+                st.markdown(f'**Generator:** {generation_provider}')
+                st.markdown(f'**Drafts requested:** {telemetry.attempts}  \n'
+                            f'**Recorded handoffs:** {len(telemetry.handoffs)}  \n'
+                            f'**Orchestration latency:** {telemetry.latency_ms:.2f} ms')
+                st.caption('Local simulation timing does not represent Azure model latency.'
+                           if simulated else f'Execution source: {source}.')
+                if telemetry.critic_feedback:
+                    st.markdown('**Validator feedback**')
+                    for number, feedback in enumerate(telemetry.critic_feedback, 1):
+                        st.caption(f'Draft {number}')
+                        st.code(feedback, language=None, wrap_lines=True)
+                st.markdown('**Recorded handoffs**')
+                for handoff in telemetry.handoffs:
+                    st.markdown(f'**Attempt {handoff.attempt}:** '
+                                f'{handoff.from_agent} → {handoff.to_agent}')
+                    st.text(handoff.reason)
 
 
 if __name__ == '__main__':

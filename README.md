@@ -109,6 +109,26 @@ Agent demo modes intentionally inject invalid creative drafts locally:
 - Simulate 1 Critic Retry: first draft fails, feedback repairs the second.
 - Simulate Double Failure -> Fallback: two drafts fail, validated fallback wins.
 
+Under **Test a review scenario**, in **Agent behavior**, select **The first draft is rejected and corrected** or
+**Both drafts are rejected and a fallback is used**. A second selector,
+**What should go wrong in the draft?**, offers six demonstrations: an invented
+player, an incorrect receiver, a recovery assigned to the wrong player, an
+incorrect duration, an incorrect pass accuracy, or missing scorer/connector names.
+Only cases applicable to the selected episode are offered.
+
+The review shows the actual rejected draft, an explanation of the recorded
+validator feedback, and the episode facts that contradict the draft. A final
+outcome explains whether the second attempt passed or a validated fallback was
+used. The **Step-by-step explanation** expander is closed by default and explains fact preparation, draft checking and
+final selection. Rejected drafts, plain-language reasons and supporting evidence
+appear at the checking step. The accepted
+text stays in the commentary above; validator messages, timing and handoffs are
+grouped under **Technical details**.
+All demonstration drafts are generated locally, including in remote API mode;
+they are stored only in the UI session and never added to API responses.
+Replay jumps reuse the result and review. Changing the mistake starts a new run;
+returning to normal generation clears the demonstration review.
+
 Simulations are explicitly labelled and never send failure-injection requests
 to a remote service. Clock changes reuse the stored result and do not generate
 narratives. Changing narrative controls starts a new run.
@@ -175,7 +195,7 @@ core analytics-only tests. They never require a browser or external network.
 2. Use **Key Events** on the left to inspect a moment, the pitch and synchronized overlays.
 3. Read **Why this goal happened** on the right. Change style, language or focus there.
    Personalization preserves the replay position; changing episodes resets it.
-4. Use **Agent behavior** above the telemetry diagram to demonstrate success,
+4. Use **Test a review scenario** and **Agent behavior** to demonstrate success,
    one critic repair, or a validated safe fallback. Help is available in the header.
 5. Earlier overlays and agent handoffs are available in their expanders.
 

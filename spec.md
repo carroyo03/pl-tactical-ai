@@ -348,6 +348,35 @@ equal timestamps, bilingual narration, retry isolation and old JSON parsing.
 
 ### Studio behavior
 
+`ui/demos.py` defines six local error cases and immutable `DemoReview` /
+`RejectedDraft` records. The demonstrator returns a structurally valid but
+factually incorrect `CreativeOutput` on one or two attempts. The existing critic
+performs the real audit, and its actual feedback is paired with the exact draft
+returned by the client. The following successful attempt uses reviewed Mock
+templates; exhaustion uses the existing deterministic fallback.
+
+`StudioService.broadcast(..., demo_error=...)` keeps its existing response type.
+The service exposes a separate UI-only review after a simulated run. This review
+is cached in Streamlit session state alongside the response and is cleared on
+normal generation. It is not added to shared telemetry, the episode, the legacy
+three-key contract or broadcast serialization. Even with API_BASE_URL configured,
+simulated runs never send injection parameters or model requests to the API.
+
+The error selector appears only for simulated behavior. Inapplicable cases are
+omitted, such as accuracy without any pass attempts or an incorrect receiver
+without a usable passing example. **Test a review scenario** is the section heading. Scenario controls remain visible
+above a collapsed **Step-by-step explanation** expander containing three separate bordered blocks: facts were established, a draft was prepared and
+checked, and the final commentary was selected. Actual rejected drafts, human-readable
+validation reasons and supporting evidence appear inline at the checking step.
+The final step describes the actual acceptance, retry or validated fallback path.
+Technical details stay collapsed; accepted commentary is not duplicated.
+Native Streamlit controls provide keyboard interaction and wrapping without new custom CSS. Both outcomes retain the current replay
+position; changing a mistake invalidates the narrative/review cache.
+
+Offline tests exercise every case across all three canonical episodes, both
+languages and both recovery modes, plus UI selection, cache clearing, replay
+preservation, no-network operation and unavailable-case filtering.
+
 Launch with `uv run streamlit run src/ui/app.py`. Local mode runs DuckDB and the
 orchestrator in process. `API_BASE_URL` enables the existing API adapter; simulated
 failures always use a local injectable client. Tests remain offline.
@@ -355,7 +384,8 @@ failures always use a local injectable client. Tests remain offline.
 The header holds Broadcast studio and Help. Choose a play and six full-episode
 metrics are global. Key Events, the pitch and on-screen facts form the tactical
 domain. Persona, language and focus controls sit above the editorial narrative;
-Agent behavior sits above agent telemetry. There is no sidebar, slider, autoplay
+Visible simulation controls precede the outcome and the evidence-based review
+walkthrough; technical details remain secondary. There is no sidebar, slider, autoplay
 or regeneration button. Event jumps reuse the narrative; personalization preserves
 the chosen offset; changing episodes resets to the complete sequence.
 

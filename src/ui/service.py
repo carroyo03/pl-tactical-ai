@@ -7,12 +7,13 @@ from urllib.request import urlopen
 
 from pydantic import ValidationError
 
-from src.agents.narrator import CreativeOutput, MockLLMClient, PersonaNarrator
+from src.agents.narrator import MockLLMClient, PersonaNarrator
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 from src.analytics.broadcast import BroadcastMetrics
 from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
 from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.ingest.repository import DuckDBRepository
+from src.ui.demos import DemoLLMClient, DemoReview, RejectedDraft, available_demo_errors
 
 DemoMode = Literal['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
 DEMO_MODES = ['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
@@ -20,21 +21,6 @@ DEMO_MODES = ['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> F
 
 class StudioServiceError(ValueError):
     """Actionable data-source failure safe to display in the studio."""
-
-
-class DemoLLMClient:
-    """New instance per run: fail once or twice, then use the offline client."""
-    provider = 'OFFLINE_MOCK'
-
-    def __init__(self, failures: int):
-        self.failures = failures
-        self.calls = 0
-
-    def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
-        self.calls += 1
-        if self.calls <= self.failures:
-            return CreativeOutput(headline='Draft awaiting audit', commentary='A draft without required player names.')
-        return MockLLMClient().generate(system_prompt=system_prompt, context=context)
 
 
 def parse_broadcast(payload: dict, *, persona: str, language: str) -> BroadcastResponse:
@@ -51,6 +37,7 @@ def parse_broadcast(payload: dict, *, persona: str, language: str) -> BroadcastR
 class StudioService:
     def __init__(self, api_base_url: str | None = None):
         self.api_base_url = api_base_url.rstrip('/') if api_base_url else None
+        self.demo_review: DemoReview | None = None
 
     def _request(self, path: str) -> object:
         try:
@@ -84,9 +71,13 @@ class StudioService:
             return repository.get(goal_id)
 
     def broadcast(self, episode: GoalEpisode, *, persona='TACTICAL_ANALYST', language='en',
-                  focus_player_id: str | None = None, mode: DemoMode = 'Normal') -> BroadcastResponse:
+                  focus_player_id: str | None = None, mode: DemoMode = 'Normal',
+                  demo_error: str = 'invented_player') -> BroadcastResponse:
+        self.demo_review = None
         if mode not in DEMO_MODES:
             raise ValueError('Unknown demo mode')
+        if mode != 'Normal' and demo_error not in available_demo_errors(episode):
+            raise ValueError('This demonstration error is not available for the episode')
         if self.api_base_url and mode == 'Normal':
             params = dict(persona=persona, language=language)
             if focus_player_id is not None:
@@ -96,8 +87,15 @@ class StudioService:
                 return parse_broadcast(payload, persona=persona, language=language)
             except (KeyError, TypeError, ValidationError) as error:
                 raise StudioServiceError('API returned an invalid broadcast contract.') from error
-        client = MockLLMClient() if mode == 'Normal' else DemoLLMClient(1 if mode == DEMO_MODES[1] else 2)
-        return BroadcastOrchestrator(client).run(
+        client = MockLLMClient() if mode == 'Normal' else DemoLLMClient(1 if mode == DEMO_MODES[1] else 2, demo_error)
+        result = BroadcastOrchestrator(client).run(
             episode, persona=persona, language=language, focus_player_id=focus_player_id,
             reconstruction=generate_mock_reconstruction(episode),
         )
+        if isinstance(client, DemoLLMClient):
+            self.demo_review = DemoReview(
+                error=demo_error, evidence_explanation=client.evidence_explanation,
+                rejected_drafts=tuple(RejectedDraft(draft.headline, draft.commentary, feedback)
+                                      for draft, feedback in zip(client.drafts, result.telemetry.critic_feedback)),
+            )
+        return result

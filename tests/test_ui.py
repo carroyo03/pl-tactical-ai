@@ -197,7 +197,7 @@ class StreamlitTests(unittest.TestCase):
             self.assertIn('Participating attackers', initial_markup)
             self.assertNotIn('[SYNTHETIC REPLAY]', initial_markup)
             self.assertNotIn('moment-pill', initial_markup)
-            self.assertIn('<strong>Accepted</strong>', initial_markup)
+            self.assertIn('**Accepted**', initial_markup)
             self.assertNotIn('No metric is triggered', initial_markup)
             self.assertIn('Tactical analyst · EN', initial_markup)
             self.assertIn('Source: Offline mock', initial_markup)
@@ -206,8 +206,8 @@ class StreamlitTests(unittest.TestCase):
             self.assertIn('Help', str(app.get('popover')[0].proto))
             self.assertEqual(app.selectbox(key='demo_mode').label, 'Agent behavior')
             self.assertEqual(app.selectbox(key='demo_mode').options, [
-                'Clean run (first-pass success)', 'Single mistake (critic recovers)',
-                'Repeated mistake (safe fallback)',
+                'Generate commentary normally', 'The first draft is rejected and corrected',
+                'Both drafts are rejected and a fallback is used',
             ])
             self.assertIn('Focus: Whole team', initial_markup)
             self.assertIn('Packing</span><strong>3', initial_markup)
@@ -298,13 +298,19 @@ class StreamlitTests(unittest.TestCase):
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'RECOVERED')
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             recovered_markup = ' '.join(element.value for element in app.markdown)
-            self.assertIn('Critic → Narrator', recovered_markup)
-            self.assertIn('Draft 1 rejected by the critic', recovered_markup)
-            self.assertIn('Repaired', recovered_markup)
+            self.assertIn('A second draft was generated from the same facts and passed validation.', recovered_markup)
+            self.assertIn('**Draft 1 was rejected**', recovered_markup)
+            walkthrough = next(item for item in app.expander if item.label == 'Step-by-step explanation')
+            self.assertFalse(walkthrough.proto.expanded)
+            self.assertFalse(any(item.label == 'Test a review scenario' for item in app.expander))
+            for step in ('1. The facts were established', '2. A draft was prepared and checked', '3. The final commentary was selected'):
+                self.assertIn(step, recovered_markup)
+            self.assertFalse(app.success)
+            self.assertFalse(app.warning)
             self.assertIn('Recovered after retry', recovered_markup)
             app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'DEGRADED_FALLBACK')
-            self.assertIn('Fallback validated', ' '.join(element.value for element in app.markdown))
+            self.assertIn('passed validation', ' '.join(element.value for element in app.markdown))
             self.assertIn('Safe fallback', ' '.join(element.value for element in app.markdown))
             self.assertIn('Source: Offline fallback', ' '.join(element.value for element in app.markdown))
             app.selectbox(key='episode').set_value('SYNTH_GOAL_03').run()
@@ -321,6 +327,38 @@ class StreamlitTests(unittest.TestCase):
             app = self.create_app_test().run()
             self.assertEqual(len(app.exception), 0)
             self.assertTrue(any('Cannot reach the API' in element.value for element in app.markdown))
+
+    def test_selectable_mistakes_show_actual_drafts_and_keep_replay_position(self):
+        from src.ui.demos import DEMO_ERRORS
+
+        with patch.dict('os.environ', {}, clear=True):
+            app = self.create_app_test().run()
+            self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
+            app.button(key='milestone_ev_02').click().run()
+            app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()
+            self.assertEqual(app.selectbox(key='demo_error').label, 'What should go wrong in the draft?')
+            for error in DEMO_ERRORS:
+                app.selectbox(key='demo_error').set_value(error).run()
+                self.assertFalse(app.exception)
+                self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'RECOVERED')
+                self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
+                review = app.session_state['_demo_review']
+                self.assertEqual(review.error, error)
+                shown = ' '.join(item.value for item in app.text)
+                self.assertIn(review.rejected_drafts[0].commentary, shown)
+                self.assertIn(review.evidence_explanation, shown)
+                self.assertTrue(any('A second draft was generated from the same facts and passed validation.' in item.value for item in app.markdown))
+                technical = next(item for item in app.expander if item.label == 'Technical details')
+                self.assertFalse(technical.proto.expanded)
+            app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
+            self.assertEqual(len(app.session_state['_demo_review'].rejected_drafts), 2)
+            self.assertTrue(any('Both drafts were rejected' in item.value for item in app.markdown))
+            self.assertTrue(any('**Draft 2 was rejected**' in item.value for item in app.markdown))
+            app.selectbox(key='demo_mode').set_value(DEMO_MODES[0]).run()
+            self.assertIsNone(app.session_state['_demo_review'])
+            self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
+            self.assertFalse(any('**Draft 1 was rejected**' in item.value for item in app.markdown))
+            self.assertFalse(app.exception)
 
 
 if __name__ == '__main__':
