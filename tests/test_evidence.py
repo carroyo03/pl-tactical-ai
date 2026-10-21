@@ -107,7 +107,8 @@ class TacticalEvidenceTests(unittest.TestCase):
         self.assertIsNone(analysis.breakdown_zone)
         response = BroadcastOrchestrator().run(GoalEpisode.model_validate(self.payload))
         self.assertIn('All scores are zero', ' '.join(body for _, body in build_analysis_explanations(response)))
-        self.assertIn('chronological tie-break', response.narrative.commentary)
+        self.assertIn('Several players share the highest connection score', response.narrative.commentary)
+        self.assertIn('appears first in the sequence', response.narrative.commentary)
 
     def test_equal_timestamps_keep_input_order_for_key_and_graph(self):
         self.payload['defenders_snapshot'] = [dict(player_id='DEF_01', x=90.0, y=50.0)]

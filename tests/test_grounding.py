@@ -178,6 +178,28 @@ class GroundingTests(unittest.TestCase):
                     comments.add(result.narrative.commentary)
                 self.assertEqual(len(comments), 3)
 
+    def test_commentary_explains_static_and_inferred_evidence_without_causal_setup(self):
+        for language in ('en', 'es'):
+            result = BroadcastOrchestrator().run(self.episode, language=language)
+            self.assertEqual(result.telemetry.status, 'SUCCESS')
+            text = result.narrative.commentary
+            self.assertIn('inferida' if language == 'es' else 'inferred', text)
+            self.assertIn('No se mide su movimiento' if language == 'es' else 'movement during the pass is not measured', text)
+            self.assertIn('mayor recuento' if language == 'es' else 'highest count', text)
+            self.assertNotIn('setting up', text)
+
+    def test_commentary_does_not_announce_a_goal_when_scorer_is_unidentified(self):
+        payload = self.episode.model_dump()
+        for event in payload['events']:
+            if event['event_type'] == 'SHOT':
+                event['is_successful'] = False
+        for language in ('en', 'es'):
+            result = BroadcastOrchestrator().run(GoalEpisode.model_validate(payload), language=language)
+            self.assertEqual(result.telemetry.status, 'SUCCESS')
+            self.assertNotIn('goal', result.narrative.headline.lower())
+            self.assertNotIn('gol', result.narrative.headline.lower())
+            self.assertIn('El goleador no está identificado.' if language == 'es' else 'The scorer is not identified.', result.narrative.commentary)
+
 
 if __name__ == '__main__':
     unittest.main()

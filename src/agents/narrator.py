@@ -99,6 +99,14 @@ Mention only player names supplied in the events. Attribute actions only to thei
 recorded authors. Passing connections are inferred from adjacent events, not observed
 receivers. Do not invent goalkeeper-beating moves or ball-flight measurements.
 Only pass accuracy is expressed as a percentage; difficulty is a score out of 100.
+Write a short, connected account in complete sentences: describe the recorded opening,
+explain why the highlighted pass was selected, describe the inferred connector role,
+and finish with the recorded goal shot if a scorer is identified. Avoid repeating the
+same action or listing metric labels. Explain technical terms in ordinary language.
+Keep inferred connections and static comparisons distinct from observed movement.
+If pivot scores are tied, explain that chronological order selects the displayed player;
+do not describe a tied player as uniquely the strongest connector. Do not call the
+highlighted pass an assist. Do not announce a goal or credit a scorer if none is identified.
 """
 
 
@@ -113,13 +121,6 @@ class MockLLMClient:
         pivot, scorer = context['pivot_name'], context['scorer_name']
         packing = context['analysis']['sequence_packing_score']
         key_id = context.get('broadcast_metrics', {}).get('key_pass_event_id')
-        cause = context['analysis']['tactical_cause']
-        causes = {
-            'Quick transition after recovery': ('a quick transition after the recovery', 'una transición rápida tras la recuperación'),
-            'Central breakthrough through a vertical pass': ('a forward pass with high static packing', 'un pase hacia delante con alto packing estático'),
-            'Positional attack': ('a positional attack', 'un ataque posicional'),
-        }
-        cause_text = causes[cause][spanish]
         first = events[0]
         actor = first['player_name']
         if first['event_type'] == 'RECOVERY' and first['is_successful']:
@@ -130,9 +131,9 @@ class MockLLMClient:
             start = f'{actor} abre la secuencia' if spanish else f'{actor} opens the sequence'
         if spanish:
             openings = {
-                'TACTICAL_ANALYST': f'{start}: así toma forma {cause_text}.',
-                'PASSIONATE_FAN': f'¡{start}! La jugada se construye con {cause_text}.',
-                'CASUAL_VIEWER': f'{start}. El equipo desarrolla {cause_text}.',
+                'TACTICAL_ANALYST': f'{start}.',
+                'PASSIONATE_FAN': f'¡{start}!',
+                'CASUAL_VIEWER': f'{start}.',
             }
             headlines = {
                 'TACTICAL_ANALYST': f'{scorer or pivot}: las claves de la jugada',
@@ -141,9 +142,9 @@ class MockLLMClient:
             }
         else:
             openings = {
-                'TACTICAL_ANALYST': f'{start}, setting up {cause_text}.',
-                'PASSIONATE_FAN': f'{start}! The move takes shape through {cause_text}.',
-                'CASUAL_VIEWER': f'{start}. The team builds {cause_text}.',
+                'TACTICAL_ANALYST': f'{start}.',
+                'PASSIONATE_FAN': f'{start}!',
+                'CASUAL_VIEWER': f'{start}.',
             }
             headlines = {
                 'TACTICAL_ANALYST': f'{scorer or pivot}: the move behind the finish',
@@ -158,7 +159,7 @@ class MockLLMClient:
             if not event['is_successful']:
                 action = f'{name} intenta un pase que no se completa' if spanish else f'{name} attempts a pass that does not come off'
             elif event['event_id'] == key_id:
-                action = f'{name} encuentra el pase clave' if spanish else f'{name} finds the key pass'
+                action = f'{name} completa el pase destacado en el análisis' if spanish else f'{name} completes the pass highlighted in the analysis'
             elif event['end_x'] > event['start_x']:
                 action = f'{name} juega hacia delante' if spanish else f'{name} sends the ball forward'
             else:
@@ -169,12 +170,12 @@ class MockLLMClient:
             action_text += '.'
         if spanish:
             links = {
-                'TACTICAL_ANALYST': f'{pivot} es el pivote táctico de la red de pases.',
-                'PASSIONATE_FAN': f'{pivot} es el enlace en el corazón de la jugada.',
-                'CASUAL_VIEWER': f'{pivot} es la pieza que más conecta la jugada.',
+                'TACTICAL_ANALYST': f'En la red de pases inferida a partir de los eventos, {pivot} es el principal enlace entre las conexiones registradas.',
+                'PASSIONATE_FAN': f'La red de pases inferida sitúa a {pivot} como enlace de la jugada.',
+                'CASUAL_VIEWER': f'Por el orden de los eventos, {pivot} aparece como el principal enlace de la red de pases.',
             }
             unit = 'defensor' if packing == 1 else 'defensores'
-            evidence = (f'En la instantánea defensiva, el pase de mayor packing supera a {packing} {unit}.'
+            evidence = (f'El pase destacado alcanza el mayor recuento de la secuencia: deja atrás a {packing} {unit} según la instantánea defensiva. No se mide su movimiento durante el pase.'
                         if packing else 'No se supera a ningún defensor en la instantánea defensiva.')
             finishes = {
                 'TACTICAL_ANALYST': f'{scorer} culmina la secuencia con el remate del gol.',
@@ -183,12 +184,12 @@ class MockLLMClient:
             }
         else:
             links = {
-                'TACTICAL_ANALYST': f'{pivot} is the tactical pivot in the passing network.',
-                'PASSIONATE_FAN': f'{pivot} is the link at the heart of the move.',
-                'CASUAL_VIEWER': f'{pivot} is the key connector in the move.',
+                'TACTICAL_ANALYST': f'In the passing network inferred from the events, {pivot} is the main link between the recorded connections.',
+                'PASSIONATE_FAN': f'The inferred passing network places {pivot} at the heart of the connections.',
+                'CASUAL_VIEWER': f'The event order identifies {pivot} as the main link in the inferred passing network.',
             }
             unit = 'defender' if packing == 1 else 'defenders'
-            evidence = (f'Against the defensive snapshot, the highest-packing pass bypasses {packing} {unit}.'
+            evidence = (f'The highlighted pass has the highest count in the sequence, bypassing {packing} {unit} against the defensive snapshot. Their movement during the pass is not measured.'
                         if packing else 'No defenders are bypassed in the defensive snapshot.')
             finishes = {
                 'TACTICAL_ANALYST': f'{scorer} completes the sequence with the goal-scoring shot.',
@@ -200,8 +201,8 @@ class MockLLMClient:
         )
         evidence_context = context.get('tactical_evidence', {})
         if pivot and len(evidence_context.get('pivot_tied_player_ids', [])) > 1:
-            tie_text = (f'{pivot} es el pivote seleccionado por desempate cronológico.' if spanish else
-                        f'{pivot} is the selected pivot after a chronological tie-break.')
+            tie_text = (f'En la red de pases inferida, varios jugadores comparten la mayor puntuación de conexión. {pivot} queda seleccionado porque aparece antes en la secuencia.' if spanish else
+                        f'Several players share the highest connection score in the inferred passing network. {pivot} is selected because that player appears first in the sequence.')
             links[persona] = tie_text
         commentary = ' '.join(part for part in (openings[persona], action_text, links[persona] if pivot else '', evidence, finish) if part)
         focus = context.get('focus', {})
@@ -217,7 +218,7 @@ class MockLLMClient:
             role = roles[focus_events[0]['event_type']][spanish]
             commentary += (f" La aportación de {focus['player_name']} incluye {role}." if spanish else
                            f" {focus['player_name']}'s contribution includes {role}.")
-        headline = headlines[persona]
+        headline = headlines[persona] if scorer else ('Las conexiones de la jugada' if spanish else 'The connections behind the move')
         if len(headline.split()) > 12:
             headline = 'Las claves de la jugada del gol' if spanish else 'The move behind the goal'
         return CreativeOutput(headline=headline, commentary=commentary)
