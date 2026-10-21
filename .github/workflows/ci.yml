@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-checks:
+    name: Offline tests and startup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      AZURE_OPENAI_ENDPOINT: ""
+      AZURE_OPENAI_API_KEY: ""
+      AZURE_OPENAI_DEPLOYMENT: ""
+      API_BASE_URL: ""
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.9.24"
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            pyproject.toml
+            .python-version
+
+      - name: Install project Python
+        run: uv python install
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Run offline regression and UI interaction tests
+        run: uv run --locked python -W error -m unittest discover -s tests -v
+
+      - name: Verify API and Streamlit startup
+        run: uv run --locked python scripts/check_startup.py

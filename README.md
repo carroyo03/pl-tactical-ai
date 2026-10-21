@@ -1,5 +1,7 @@
 # PL Tactical AI
 
+[![CI](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml)
+
 Install dependencies and the project as an editable package:
 
 ```sh
@@ -28,6 +30,27 @@ uv run test_tactical_engine.py
 ```
 
 When running Python directly, use the project's synchronized virtual environment.
+
+## Continuous integration
+
+The `CI` GitHub Actions workflow runs on pushes to `main`, pull requests and manual
+dispatches. A single Ubuntu job installs the Python version in `.python-version`
+and dependencies from `uv.lock`, runs the offline regression suite (including
+Streamlit AppTest interactions), then verifies actual FastAPI and Streamlit server
+startup with `scripts/check_startup.py`.
+
+No repository secrets or Azure resources are required. Provider credentials are
+not supplied, and the checks use the offline client. The startup check validates
+HTTP readiness, not browser appearance. The workflow does not deploy the app.
+
+Runs have read-only repository permissions and a ten-minute timeout. New runs
+cancel older runs for the same branch or pull request; dependency caching avoids
+unnecessary downloads. Actions are pinned to commit hashes, and Dependabot checks
+for action updates weekly.
+
+After pushing the workflow, open **Actions → CI** to inspect the first run. Once
+it passes, `Offline tests and startup` can be selected as a required check in the
+repository's branch rules; this workflow does not configure those rules itself.
 
 ## API backend
 
