@@ -217,8 +217,22 @@ is a reference template, not an automatically loaded configuration file.
 The critic audits recognized English/Spanish packing and defender counts (digits
 and number words), labelled accuracy/difficulty/distance, numeric values, explicit
 zones and known-player pivot/scorer/key-pass claims. It rejects unsupported physical
-units. This is a bounded deterministic audit, not a proof that every possible
-paraphrase or nonnumeric sentence is true. Reviewed bilingual Mock templates
+units. Headline and commentary are audited separately. Recognized actor/action
+patterns are also checked against the recorded events: capitalized multiword
+names in actor/recipient positions must be known; carries, shots, successful
+recoveries and completed passes require corresponding player events; explicit
+pass recipients must follow the pass immediately on the full event clock.
+Common passive scorer/role claims, labelled episode duration and completion
+counts are checked too. Player-level counts use that player's attempts, while
+team counts use scoring-team attempts. Percentages are reserved for episode
+pass accuracy. The original invented-player example now triggers repair, or
+validated fallback if the second attempt also fails.
+
+These checks recognize specific English/Spanish constructions; they are not a
+general named-entity recognizer or proof that every paraphrase or nonnumeric
+sentence is true. Single-word or lowercase invented names, indirect/passive
+action paraphrases and broader semantic contradictions can escape the audit.
+Reviewed bilingual Mock templates
 remain the token-free default; there is no automatic translation dependency.
 
 Production SDK requests have a 10-second timeout, zero SDK retries and a

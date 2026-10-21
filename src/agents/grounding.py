@@ -35,12 +35,84 @@ def matches_value(value: float, expected: float) -> bool:
     return any(abs(value - round(expected, places)) < 1e-6 for places in (0, 1, 2, 6))
 
 
+def audit_event_claims(text: str, facts: dict) -> None:
+    """Check bounded actor/action patterns against recorded events, not general prose."""
+    content = normalize(text)
+    known = {normalize(name) for name in facts['known_names']}
+    # Look for plausible multiword names in actor/recipient positions. This is
+    # intentionally narrower than treating every capitalized phrase as a person.
+    token = r"[A-ZÀ-ÖØ-Þ][\wÀ-ÿ'’\-]*"
+    person = rf'{token}(?:\s+{token}){{1,3}}'
+    action = (r'scores?|scored|shoots?|dribbles?|dribbled|carries|carried|passes|passed|'
+              r'plays|played|wins|won|recovers|recovered|receives|received|finishes|finished|'
+              r'features?|appears?|participates?|marca|marcó|anota|anotó|dispara|remata|'
+              r'regatea|regateó|conduce|condujo|pasa|pasó|recupera|recuperó|recibe|aparece|participa')
+    patterns = [rf'(?<!\w)({person})\s+(?i:{action})\b',
+                rf'\b(?i:from|to|by|de|por|a|and|y)\s+({person})(?!\w)']
+    generic = {'the team', 'el equipo', 'the goal', 'el gol', 'the move', 'la jugada',
+               'defensive third', 'middle third', 'attacking third',
+               'the defensive third', 'the middle third', 'the attacking third',
+               'tercio defensivo', 'tercio medio', 'tercio ofensivo'}
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            name = normalize(match.group(1))
+            if name not in known:
+                name = re.sub(r'^(?:and|then|after|as|while|when|once|with|following|y|despues|tras|cuando|mientras|con|luego)\s+', '', name)
+            name = re.sub(r"(?:'s|’s)$", '', name)
+            if name not in known and name not in generic:
+                raise GroundingError('Named actor or recipient is not present in the episode')
+
+    events = facts.get('events', [])
+    if not events:
+        return
+    by_name = {}
+    for event in events:
+        by_name.setdefault(normalize(event['player_name']), []).append(event)
+    predicates = [
+        (r'(?:dribbles|dribbled|carries|carried|regatea|regateo|conduce|condujo)\b', 'CARRY', False),
+        (r'(?:shoots|shot|takes\s+a\s+shot|dispara|remata)\b', 'SHOT', False),
+        (r'(?:wins\s+possession|won\s+possession|recovers\s+the\s+ball|recovered\s+the\s+ball|recupera\s+el\s+balon|recupero\s+el\s+balon)\b', 'RECOVERY', True),
+        (r'(?:completes|completed|completa|completo)\s+(?:(?:a|the|his|un|el|su)\s+)?(?:pass|pase)\b', 'PASS', True),
+        (r'(?:passes|passed|pasa|paso)\s+(?:to|a)\b', 'PASS', True),
+    ]
+    for name, recorded in by_name.items():
+        player = re.escape(name)
+        for predicate, kind, successful in predicates:
+            if re.search(rf'(?<!\w){player}\s+{predicate}', content):
+                if not any(event['event_type'] == kind and (not successful or event['is_successful'])
+                           for event in recorded):
+                    raise GroundingError(f'Player action is not supported by recorded {kind} events')
+        for match in re.finditer(rf'(?<!\w){player}\s+(?:completed|completes|completo|completa)\s+'
+                                 rf'({NUMBER})\s+(?:of|out of|de)\s+({NUMBER})\s+(?:passes|pases)\b', content):
+            attempts = [event for event in recorded if event['event_type'] == 'PASS']
+            completed = sum(event['is_successful'] for event in attempts)
+            if (number(match.group(1)), number(match.group(2))) != (completed, len(attempts)):
+                raise GroundingError('Player pass completion count does not match their recorded attempts')
+
+    connections = set()
+    for event, following in zip(events, events[1:]):
+        if (event['event_type'] == 'PASS' and event['is_successful']
+                and following['team'] == event['team'] and following['player_id'] != event['player_id']):
+            connections.add((normalize(event['player_name']), normalize(following['player_name'])))
+    alternatives = '|'.join(re.escape(name) for name in sorted(by_name, key=len, reverse=True))
+    for match in re.finditer(rf'(?<!\w)({alternatives})\s+(?:passes|passed|pasa|paso)\s+'
+                             rf'(?:to|a)\s+({alternatives})(?!\w)', content):
+        if (match.group(1), match.group(2)) not in connections:
+            raise GroundingError('Pass recipient is not supported by the event sequence')
+
+    # The canonical input has no evidence for keeper-beating moves or flight speeds.
+    if re.search(r'\b(?:dribbles?\s+past\s+the\s+goalkeeper|regatea\s+al\s+portero|'
+                 r'ball\s+speed|shot\s+speed|velocidad\s+del\s+balon|velocidad\s+del\s+disparo)\b', content):
+        raise GroundingError('Goalkeeper-beating action or ball speed is not established by episode events')
+
+
 def audit_tactical_claims(text: str, facts: dict) -> None:
     """Audit recognized counts, metric labels, zones and roles in English/Spanish.
 
     Paraphrases and arbitrary nonnumeric claims still need evaluation. This audit
     deliberately does not claim to prove every sentence true.
     """
+    audit_event_claims(text, facts)
     content = normalize(text)
     packing = facts['analysis']['sequence_packing_score']
     patterns = [
@@ -54,6 +126,22 @@ def audit_tactical_claims(text: str, facts: dict) -> None:
                 raise GroundingError(f'Packing claim contradicts engine: expected {packing}, got {match.group(1)}')
 
     metrics = facts.get('broadcast_metrics', {})
+    for match in re.finditer(rf'(?<!\w)({NUMBER})\s*%', content):
+        accuracy = metrics.get('pass_accuracy')
+        if accuracy is None or not matches_value(number(match.group(1)), accuracy * 100):
+            raise GroundingError('Percentage claim does not match episode pass accuracy')
+    for match in re.finditer(rf'\b(?:sequence duration|episode duration|duracion de la jugada|duracion de la secuencia){LINK}({NUMBER})', content):
+        duration = facts.get('duration_sec')
+        if duration is None or not matches_value(number(match.group(1)), duration):
+            raise GroundingError('Duration claim does not match the episode clock')
+    for match in re.finditer(rf'\b(?:completed|completes|completo|completa)\s+({NUMBER})\s+'
+                             rf'(?:of|out of|de)\s+({NUMBER})\s+(?:passes|pases)\b', content):
+        # Individual completion counts were checked against that player's events.
+        prefix = content[:match.start()].rstrip()
+        if any(re.search(rf'(?<!\w){re.escape(normalize(name))}$', prefix) for name in facts['known_names']):
+            continue
+        if (number(match.group(1)), number(match.group(2))) != (metrics.get('successful_passes'), metrics.get('total_passes')):
+            raise GroundingError('Pass completion count does not match the scoring-team denominator')
     for label, key, multiplier in [
         (r'(?:pass accuracy|precision de pase|precision de pases)', 'pass_accuracy', 100),
         (r'(?:pass difficulty|dificultad del pase)', 'pass_difficulty', 1),
@@ -81,6 +169,18 @@ def audit_tactical_claims(text: str, facts: dict) -> None:
 
     for name in facts['known_names']:
         player = re.escape(normalize(name))
+        for expected, label in [
+            (facts.get('pivot_name'), r'(?:tactical pivot|pivote tactico)'),
+            (facts.get('scorer_name'), r'(?:scorer|goleador)'),
+            (facts.get('key_pass_player_name'), r'(?:key.pass author|autor del pase clave)'),
+        ]:
+            if name != expected and (re.search(rf'\b{label}\s+(?:is|was|es|fue)\s+{player}(?!\w)', content)
+                                     or re.search(rf'(?<!\w){player}\s+(?:is|was|es|fue)\s+(?:(?:the|el)\s+)?{label}\b', content)):
+                raise GroundingError('Explicit player role contradicts episode facts')
+        if name != facts.get('scorer_name') and re.search(
+            rf'\b(?:goal\s+(?:is\s+|was\s+)?scored\s+by|gol\s+(?:es\s+|fue\s+)?marcado\s+por)\s+{player}(?!\w)', content,
+        ):
+            raise GroundingError('Passive goal-scoring claim names the wrong player')
         if name != facts.get('pivot_name') and re.search(
             rf'\b{player}\s+(?:is|was|es|fue)\s+(?:(?:the|el)\s+)?(?:tactical pivot|key connector|pivote tactico)\b', content,
         ):

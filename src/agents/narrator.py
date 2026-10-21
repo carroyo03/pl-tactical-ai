@@ -64,7 +64,8 @@ class NarrativeOutput(CreativeOutput):
                 if re.search(r'(?<!\w)' + re.escape(identifier) + r'(?!\w)', text):
                     raise ValueError('Internal IDs must not appear in narrative text')
         if 'facts' in grounding:
-            audit_tactical_claims(self.headline + ' ' + self.commentary, grounding['facts'])
+            for text in (self.headline, self.commentary):
+                audit_tactical_claims(text, grounding['facts'])
         # Preserve validated context for nested response-model revalidation.
         self._grounding = grounding
         return self
@@ -94,6 +95,10 @@ packing on one pass, never a sum. Do not confuse the tactical pivot with the key
 Only successful scoring-team passes contribute to packing and the pass graph.
 Tactical causes are rule-based labels, not causal proof. The legacy central-breakthrough
 label means high static packing; do not infer a central channel from it.
+Mention only player names supplied in the events. Attribute actions only to their
+recorded authors. Passing connections are inferred from adjacent events, not observed
+receivers. Do not invent goalkeeper-beating moves or ball-flight measurements.
+Only pass accuracy is expressed as a percentage; difficulty is a score out of 100.
 """
 
 
@@ -340,6 +345,8 @@ class PersonaNarrator:
                 'pivot_name': pivot, 'scorer_name': scorer,
                 'broadcast_metrics': metrics.model_dump(),
                 'key_pass_player_name': key_pass.player_name if key_pass else None,
+                'events': [e.model_dump() for e in events],
+                'duration_sec': episode.timestamp_goal - events[0].timestamp_sec,
                 'allowed_numbers': [len(events), episode.timestamp_goal - events[0].timestamp_sec,
                                     *[e.timestamp_sec - events[0].timestamp_sec for e in events],
                                     *[e.timestamp_sec for e in events],

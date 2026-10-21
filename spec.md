@@ -417,6 +417,53 @@ and API compatibility. Run the complete suite with
 
 ## Pre-Azure reliability baseline
 
+### Event-grounded creative checks
+
+Grounding context now includes a separate copy of chronological episode events
+and `duration_sec`. These facts are prepared before generation and kept private;
+no fields are added to `CreativeOutput`, `NarrativeOutput` or legacy success JSON.
+The existing headline and commentary fields are audited separately so a pattern
+cannot accidentally span their boundary.
+
+The audit adds bounded English/Spanish checks:
+
+- Capitalized multiword names in recognized actor or recipient positions must
+  match an episode name. Generic team/zone phrases, discourse prefixes, source
+  accents, apostrophes, hyphens and digits are preserved. This is a contextual
+  pattern check, not general named-entity recognition.
+- Recognized carry, shooting, possession-recovery, completed-pass and passes-to
+  claims require matching events by that author. Possession won and completed
+  passes require successful events; an unsuccessful shot can support a shot
+  mention without supporting a goal claim.
+- Explicit passes-to claims require an immediately adjacent same-team event
+  after a successful pass, with a different player ID. Rival events cannot be
+  skipped. This checks consistency with the recipient inference proxy, not
+  physical evidence of receipt.
+- Selected passive scorer statements and explicit player-role constructions
+  must identify the known scorer, pivot or key-pass author.
+- Recognized completion counts match successful/attempted passes. A named player
+  is checked against their own events; otherwise the scoring-team counts apply.
+  Labelled sequence duration matches the episode clock. Percentages must match
+  pass accuracy; difficulty stays a score. Supported numeric words remain 0–20.
+- Explicit ball/shot speed labels and recognized keeper-beating dribbles are
+  rejected because the event contract does not establish those measurements or
+  actions. Authored reconstruction frames cannot supply narrative evidence.
+
+The original `Zorlan Phantom` example is rejected in direct narration and enters
+the existing feedback-driven retry in broadcast. A second rejection still emits
+the validated deterministic fallback. Facts and contracts are not recomputed or
+rewritten to accept a draft. No extra model calls, online dependency, language
+detector or semantic verifier are introduced.
+
+Adversarial offline tests cover unknown actors/recipients, wrong action authors,
+failed recoveries, false passing connections, passive goal attribution, numeric
+scope errors and fallback. Positive cases cover truthful bilingual statements,
+source-name variations and existing persona templates. Unsupported paraphrases,
+lowercase/single-word invented names and arbitrary semantic claims can still
+pass; these checks must not be advertised as zero hallucination.
+
+### Provider and recovery baseline
+
 - `agents/grounding.py` audits explicit English/Spanish claims against immutable
   request facts: maximum packing and defender counts, labelled pass metrics,
   allowed numeric values (0/1/2 decimal rounding), exact zone labels, and selected
