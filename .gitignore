@@ -1,4 +1,5 @@
 # Local editor and agent configuration
+AGENTS.md
 .vscode/
 .idea/
 .kiro/
