@@ -243,8 +243,8 @@ is unchanged and checks the altered text against the original facts:
 - Simulate 1 Critic Retry: first draft fails, feedback repairs the second.
 - Simulate Double Failure -> Fallback: two drafts fail, validated fallback wins.
 
-Under **Test a review scenario**, in **Agent behavior**, select **The first draft is rejected and corrected** or
-**Both drafts are rejected and a fallback is used**. A second selector,
+Open **Test the safety checks** above the commentary and, under **How should the review behave?**, select **One correction** (the first draft is rejected and corrected) or
+**Fallback** (both drafts are rejected and a fallback is used). A second selector,
 **What should go wrong in the draft?**, offers six demonstrations: an invented
 player, an incorrect receiver, a recovery assigned to the wrong player, an
 incorrect duration, an incorrect pass accuracy, or missing scorer/connector names.
@@ -337,7 +337,7 @@ core analytics-only tests. They never require a browser or external network.
 2. Use **Key Events** on the left to inspect a moment, the pitch and synchronized overlays.
 3. Read **Why this goal happened** on the right. Change style, language or focus there.
    Personalization preserves the replay position; changing episodes resets it.
-4. Use **Test a review scenario** and **Agent behavior** to demonstrate success,
+4. Use **Test the safety checks** to demonstrate success,
    one critic repair, or a validated safe fallback. Help is available in the header.
 5. Earlier overlays and agent handoffs are available in their expanders.
 

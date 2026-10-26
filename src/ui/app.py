@@ -361,7 +361,7 @@ def main() -> None:
                 st.markdown('Use **Choose a play** above the episode metrics. Personalize the story in the right column. Select a **Key Events** milestone on the left '
                             'to inspect that moment; the final **Goal shot** milestone shows the complete sequence. '
                             'Episode metrics stay fixed while the pitch and overlays follow your selection. '
-                            'Open **Test a review scenario** below the commentary to demonstrate a clean run, critic recovery or safe fallback.')
+                            'Open **Test the safety checks** above the commentary to demonstrate a clean run, critic recovery or safe fallback.')
                 st.markdown('The pitch shows authored synthetic positions at each event: eleven opponents '
                             'and the participating attackers. At the key pass, crosses show the separate '
                             'five-defender static reference used for packing. These positions are illustrative; '
@@ -406,16 +406,19 @@ def main() -> None:
             players = {event.player_id: event.player_name for event in episode.events}
             focus_id = narrative_controls[2].selectbox('Focus player', [None, *players, 'P_99'], key='focus',
                                     format_func=lambda player: 'Whole team' if player is None else players.get(player, 'External player / absent'))
-        editorial_slot = st.container(key='editorial_domain')
-        st.markdown('<h2 class="section-heading">Test a review scenario</h2>', unsafe_allow_html=True)
-        with st.container(key='agent_controls', border=True):
-            behavior_labels = dict(zip(DEMO_MODES, [
-                'Generate commentary normally',
-                'The first draft is rejected and corrected',
-                'Both drafts are rejected and a fallback is used',
+        # Scenario controls sit directly above the action that runs them (proximity),
+        # collapsed until needed (progressive disclosure).
+        with st.expander('Test the safety checks', icon=':material/rule:',
+                         expanded=st.session_state.get('demo_mode', DEMO_MODES[0]) != DEMO_MODES[0]):
+            mode_labels = dict(zip(DEMO_MODES, ['Normal run', 'One correction', 'Fallback']))
+            mode_help = dict(zip(DEMO_MODES, [
+                'Generate commentary normally.',
+                'The first draft is rejected and corrected.',
+                'Both drafts are rejected and a fallback is used.',
             ]))
-            mode = st.selectbox('Agent behavior', DEMO_MODES, key='demo_mode',
-                                         format_func=behavior_labels.get)
+            mode = st.segmented_control('How should the review behave?', DEMO_MODES, key='demo_mode',
+                                        default=DEMO_MODES[0], required=True, format_func=mode_labels.get)
+            st.caption(mode_help[mode])
             demo_error = None
             if mode != 'Normal':
                 options = available_demo_errors(episode)
@@ -424,7 +427,9 @@ def main() -> None:
                 demo_error = st.selectbox('What should go wrong in the draft?', options, key='demo_error',
                                            format_func=DEMO_ERRORS.get)
                 st.caption('This demonstration runs locally. The selected error is introduced into the provider’s draft so the critic’s response can be inspected.'
-                           + (' Each run requests the active model and is never reused from the cache.' if real_local else ''))
+                           + (' Each run requests the active model and is never reused from the cache.' if real_local
+                              else ' The offline mock runs automatically when you change these options.'))
+        editorial_slot = st.container(key='editorial_domain')
         telemetry_slot = st.container(key='telemetry_domain')
         technical_slot = st.container(key='technical_details')
     # Session state survives script reruns; template edits must refresh cached text.
@@ -444,16 +449,18 @@ def main() -> None:
     key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision,
            os.getenv('GROQ_MODEL', DEFAULT_MODEL) if real_local else None)
     generate = False
+    action_label = 'Generate commentary' if mode == 'Normal' else 'Run review scenario'
     if real_local:
         with editorial_slot:
-            generate = st.button('Generate commentary' if mode == 'Normal' else 'Run review scenario',
-                                 key='generate_commentary', type='primary', width='stretch')
+            generate = st.button(action_label, key='generate_commentary', type='primary', width='stretch',
+                                 icon=':material/play_arrow:' if mode == 'Normal' else ':material/rule:')
             st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.'
                        if mode == 'Normal' else
                        'Uses up to two model requests from the free allowance. Scenario results are not reused.')
             if generate:
                 try:
-                    with st.spinner('Your commentary is being prepared. This may take up to 20 seconds.'):
+                    with st.spinner('Your commentary is being prepared. This may take up to 20 seconds.' if mode == 'Normal'
+                                    else 'The review scenario is running. This may take up to 20 seconds.'):
                         from src.ui.generation import generate_interactively
                         progress = st.empty()
                         try:
@@ -573,15 +580,26 @@ def main() -> None:
             html_card('No metric is triggered at this event. Select the Key pass milestone to see the pass overlays.', 'overlay history')
         for item in active_overlays:
             render_overlay(item)
+    scenario_pill = ''
+    if (story_review if real_local else st.session_state.get('_demo_review')) is not None and simulated:
+        outcome_text = {'RECOVERED': 'corrected after 1 retry', 'DEGRADED_FALLBACK': 'fallback used',
+                        'SUCCESS': 'accepted first time'}.get(status, status.lower())
+        shown_review = story_review if real_local else st.session_state.get('_demo_review')
+        outcome_text += {'NOT_EXECUTED': ' · error not introduced', 'NOT_DETECTED': ' · error not detected'}.get(
+            shown_review.scenario_status, '')
+        scenario_pill = f'<span class="editorial-pill">Review scenario: {outcome_text}</span>'
     with editorial_slot:
         if real_local:
             if story and story[0] != key:
-                st.info('Your selections have changed. The previous commentary remains below; select Generate commentary to update it.')
+                st.info(f'Your selections have changed. The previous commentary remains below; select {action_label} to update it.')
                 st.caption('Commentary play: ' + EPISODE_LABELS.get(commentary_result.episode.goal_id, 'Previously selected play'))
             elif not story:
-                st.info('Select Generate commentary to request an AI explanation. A prepared explanation is shown for now.')
+                st.info(f'Select {action_label} to request an AI explanation. A prepared explanation is shown for now.')
             if story and telemetry.status == 'DEGRADED_FALLBACK':
-                st.warning('AI commentary is currently unavailable. A prepared explanation is shown instead.')
+                if story_review is not None and story_review.scenario_status == 'COMPLETED':
+                    st.info('Review scenario result: both drafts were altered by this test and rejected, so the validated fallback is shown. The model was available.')
+                else:
+                    st.warning('AI commentary is currently unavailable. A prepared explanation is shown instead.')
             if story and telemetry.cache_hit:
                 st.caption('This explanation was generated previously and passed the checks. No new model request was needed.')
             if telemetry.model:
@@ -601,7 +619,7 @@ def main() -> None:
                   '<div class="editorial-badges">'
                   f'<span class="editorial-pill">{escape(PERSONA_LABELS[commentary_persona])} · {commentary_language.upper()}</span>'
                   f'<span class="editorial-pill">Focus: {escape(focus_text)}</span>'
-                  f'<span class="editorial-pill">Source: {narrative_provider}</span></div>'
+                  f'<span class="editorial-pill">Source: {narrative_provider}</span>{scenario_pill}</div>'
                   f'<p class="commentary">{escape(commentary_result.narrative.commentary)}</p>'
                   '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
                   f'<div class="fact-strip">{chips}</div>'
@@ -615,7 +633,8 @@ def main() -> None:
                     st.markdown(body)
     with telemetry_slot:
         with st.container(key='telemetry'):
-            with st.expander('Step-by-step explanation', expanded=False):
+            with st.expander('Step-by-step explanation', icon=':material/checklist:',
+                             expanded=bool(real_local and story_review is not None and story and story[0] == key)):
                 with st.container(border=True, key='review_facts'):
                     st.markdown('**1. The facts were established**')
                     st.caption('Tactical Analyst')

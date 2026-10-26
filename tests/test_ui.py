@@ -275,10 +275,9 @@ class StreamlitTests(unittest.TestCase):
             self.assertEqual(len(app.sidebar.selectbox), 0)
             self.assertEqual(len(app.sidebar.button), 0)
             self.assertIn('Help', str(app.get('popover')[0].proto))
-            self.assertEqual(app.selectbox(key='demo_mode').label, 'Agent behavior')
-            self.assertEqual(app.selectbox(key='demo_mode').options, [
-                'Generate commentary normally', 'The first draft is rejected and corrected',
-                'Both drafts are rejected and a fallback is used',
+            self.assertEqual(app.segmented_control(key='demo_mode').label, 'How should the review behave?')
+            self.assertEqual(app.segmented_control(key='demo_mode').options, [
+                'Normal run', 'One correction', 'Fallback',
             ])
             self.assertIn('Focus: Whole team', initial_markup)
             self.assertIn('Packing</span><strong>3', initial_markup)
@@ -365,7 +364,7 @@ class StreamlitTests(unittest.TestCase):
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             app.selectbox(key='focus').set_value('P_99').run()
             self.assertFalse(app.session_state['_broadcast'].focus.participated)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[1]).run()
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'RECOVERED')
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             recovered_markup = ' '.join(element.value for element in app.markdown)
@@ -380,7 +379,7 @@ class StreamlitTests(unittest.TestCase):
             self.assertFalse(app.success)
             self.assertFalse(app.warning)
             self.assertIn('The corrected commentary is displayed above.', recovered_markup)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'DEGRADED_FALLBACK')
             self.assertIn('passed validation', ' '.join(element.value for element in app.markdown))
             self.assertIn('An offline fallback was assembled', ' '.join(element.value for element in app.markdown))
@@ -407,7 +406,7 @@ class StreamlitTests(unittest.TestCase):
             app = self.create_app_test().run()
             self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
             app.button(key='milestone_ev_02').click().run()
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[1]).run()
             self.assertEqual(app.selectbox(key='demo_error').label, 'What should go wrong in the draft?')
             for error in DEMO_ERRORS:
                 app.selectbox(key='demo_error').set_value(error).run()
@@ -422,11 +421,11 @@ class StreamlitTests(unittest.TestCase):
                 self.assertTrue(any('A second draft was generated from the same facts and passed validation.' in item.value for item in app.markdown))
                 technical = next(item for item in app.expander if item.label == 'Technical details')
                 self.assertFalse(technical.proto.expanded)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(len(app.session_state['_demo_review'].rejected_drafts), 2)
             self.assertTrue(any('Both drafts were rejected' in item.value for item in app.markdown))
             self.assertTrue(any('**Attempt 2**' in item.value for item in app.markdown))
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[0]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[0]).run()
             self.assertIsNone(app.session_state['_demo_review'])
             self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
             self.assertFalse(any('**Attempt 1**' in item.value for item in app.markdown))
