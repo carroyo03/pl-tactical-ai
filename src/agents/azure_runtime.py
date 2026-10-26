@@ -2,9 +2,13 @@
 from dataclasses import dataclass
 import os
 from threading import BoundedSemaphore, Lock
-from time import perf_counter
+from time import monotonic, perf_counter
 
-from src.agents.narrator import AZURE_REQUEST_TIMEOUT_SEC, AzureOpenAIClient
+from src.agents.narrator import (
+    AZURE_REQUEST_TIMEOUT_SEC, AzureOpenAIClient, NarrativeGenerationError,
+)
+
+RUN_DEADLINE_SEC = 20
 
 DEFAULT_API_VERSION = '2024-10-21'
 COGNITIVE_SERVICES_SCOPE = 'https://cognitiveservices.azure.com/.default'
@@ -54,9 +58,29 @@ def create_azure_sdk(settings: AzureSettings):
 
 
 def enabled() -> bool:
-    """Studio-side Azure generation is an explicit opt-in: LLM_PROVIDER=azure plus full settings."""
-    return (os.getenv('LLM_PROVIDER', '').lower() == 'azure' and not paid_models_disabled()
-            and azure_settings() is not None)
+    """Studio-side Azure generation is an explicit opt-in. Incomplete settings stay enabled so
+    the studio reports a configuration error instead of silently using the offline mock."""
+    return os.getenv('LLM_PROVIDER', '').lower() == 'azure' and not paid_models_disabled()
+
+
+class GenerationStopped(NarrativeGenerationError):
+    """The request was abandoned or its time window closed; no further model call is made."""
+    retryable = False
+
+
+class BoundedAzureClient(AzureOpenAIClient):
+    """Check cancellation and the overall deadline before every model call."""
+
+    def __init__(self, sdk, deployment, *, deadline: float, cancel_event=None):
+        super().__init__(sdk, deployment)
+        self.deadline, self.cancel_event = deadline, cancel_event
+
+    def generate(self, *, system_prompt, context):
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise GenerationStopped('generation_cancelled')
+        if monotonic() + 1 >= self.deadline:
+            raise GenerationStopped('generation_deadline')
+        return super().generate(system_prompt=system_prompt, context=context)
 
 
 class AzureRuntime:
@@ -73,12 +97,12 @@ class AzureRuntime:
     def run(self, episode, *, cancel_event=None, modifier=None, **selection):
         from src.agents.orchestrator import BroadcastOrchestrator
         from src.ingest.mock_generator import generate_mock_reconstruction
-        from src.agents.narrator import NarrativeGenerationError
         if not self.slots.acquire(blocking=False):
             raise NarrativeGenerationError('The studio is busy right now. Please wait a moment and try again.')
         started = perf_counter()
         try:
-            client = AzureOpenAIClient(self.sdk, self.deployment)
+            client = BoundedAzureClient(self.sdk, self.deployment, deadline=monotonic() + RUN_DEADLINE_SEC,
+                                        cancel_event=cancel_event)
             result = BroadcastOrchestrator(client, modifier).run(
                 episode, **selection, reconstruction=generate_mock_reconstruction(episode))
         finally:
@@ -87,7 +111,8 @@ class AzureRuntime:
         telemetry.model = self.deployment
         # Every narrator attempt is one provider request, including attempts that failed in transit.
         telemetry.provider_calls = telemetry.attempts
-        telemetry.total_tokens = client.usage if client.usage_known else None
+        # A total is reported only when every provider request returned its usage.
+        telemetry.total_tokens = client.usage if client.usage_known and not client.unknown_calls else None
         telemetry.generation_latency_ms = (perf_counter() - started) * 1000
         return result
 
@@ -103,7 +128,7 @@ _runtimes: dict = {}
 def local_runtime() -> AzureRuntime:
     settings = azure_settings()
     if not enabled() or settings is None:
-        raise ValueError('Azure OpenAI generation is not enabled')
+        raise ValueError('Azure OpenAI generation is not configured')
     identity = (settings.endpoint, settings.deployment, settings.api_key, settings.entra, settings.api_version)
     with _lock:
         if identity not in _runtimes:

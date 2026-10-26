@@ -40,10 +40,47 @@ class AzureRuntimeTests(unittest.TestCase):
             self.assertEqual(active_provider(), 'AZURE_OPENAI')
             self.assertEqual(active_model(), 'unit-deployment')
             self.assertTrue(azure_settings().entra)
-        for change in ({'LLM_PROVIDER': ''}, {'DISABLE_PAID_MODELS': 'true'}, {'AZURE_OPENAI_AUTH': ''},
-                       {'AZURE_OPENAI_DEPLOYMENT': ''}):
+        for change in ({'LLM_PROVIDER': ''}, {'DISABLE_PAID_MODELS': 'true'}):
             with self.subTest(change=change), patch.dict('os.environ', {**ENVIRONMENT, **change}, clear=True):
                 self.assertIsNone(active_provider())
+
+    def test_incomplete_settings_report_a_configuration_error_instead_of_the_mock(self):
+        for change in ({'AZURE_OPENAI_AUTH': ''}, {'AZURE_OPENAI_DEPLOYMENT': ''}, {'AZURE_OPENAI_ENDPOINT': ''}):
+            with self.subTest(change=change), patch.dict('os.environ', {**ENVIRONMENT, **change}, clear=True):
+                self.assertEqual(active_provider(), 'AZURE_OPENAI')
+                with self.assertRaises(StudioServiceError) as failure:
+                    StudioService().broadcast(episode())
+                self.assertIn('not configured', str(failure.exception))
+
+    def test_abandoned_requests_make_no_further_model_call(self):
+        from threading import Event
+        sdk, parse = echoing_sdk()
+        cancel = Event()
+        cancel.set()
+        result = AzureRuntime(sdk, 'unit-deployment').run(episode(), cancel_event=cancel)
+        self.assertEqual(parse.call_count, 0)
+        self.assertEqual(result.telemetry.status, 'DEGRADED_FALLBACK')
+        self.assertEqual(result.telemetry.narrative_provider, 'OFFLINE_FALLBACK')
+
+    def test_degraded_azure_result_uses_the_validated_offline_narrative_like_groq(self):
+        sdk, _ = echoing_sdk()
+        sdk.chat.completions.parse.side_effect = None
+        from src.agents.narrator import NarrativeGenerationError
+        sdk.chat.completions.parse.side_effect = NarrativeGenerationError('Azure temporarily unavailable (503)')
+        result = AzureRuntime(sdk, 'unit-deployment').run(episode())
+        self.assertEqual(result.telemetry.status, 'DEGRADED_FALLBACK')
+        self.assertNotIn('Verified participants', result.narrative.commentary)
+
+    def test_total_tokens_are_withheld_when_a_billed_request_reports_no_usage(self):
+        from openai import LengthFinishReasonError
+        good = echoing_sdk()[1].side_effect
+        length = LengthFinishReasonError(completion=SimpleNamespace(usage=None))
+        sdk, parse = echoing_sdk()
+        parse.side_effect = [good(**{'messages': [{}, {'content': json.dumps({'verified_reference': {
+            'headline': 'x', 'commentary': 'y'}})}]}), length]
+        runtime = AzureRuntime(sdk, 'unit-deployment')
+        result = runtime.run(episode(), modifier=DraftModifier('invented_player', 1))
+        self.assertIsNone(result.telemetry.total_tokens)
 
     def test_normal_run_records_deployment_calls_and_tokens(self):
         sdk, parse = echoing_sdk()

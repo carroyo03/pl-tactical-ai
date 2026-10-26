@@ -242,6 +242,15 @@ class AzureOpenAIClient:
         self.deployment = deployment
         self.usage = 0
         self.usage_known = False
+        self.unknown_calls = 0  # requests whose token usage was not reported
+
+    def _count(self, usage) -> bool:
+        tokens = getattr(usage, 'total_tokens', None)
+        if isinstance(tokens, int):
+            self.usage_known = True
+            self.usage += tokens
+            return True
+        return False
 
     def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
         from src.agents.writing import writing_messages
@@ -262,17 +271,18 @@ class AzureOpenAIClient:
             raise NarrativeGenerationError('Azure connection unavailable') from None
         except RateLimitError:
             raise NarrativeGenerationError('Azure rate limit reached (429)') from None
-        except LengthFinishReasonError:
+        except LengthFinishReasonError as error:
+            # The request was billed even though no usable answer came back.
+            if not self._count(getattr(getattr(error, 'completion', None), 'usage', None)):
+                self.unknown_calls += 1
             raise NarrativeGenerationError('Azure response exceeded the output limit') from None
         except APIStatusError as error:
             if error.status_code in (408, 409) or error.status_code >= 500:
                 raise NarrativeGenerationError(f'Azure temporarily unavailable ({error.status_code})') from None
             # Authentication, permissions and malformed configuration need correction.
             raise
-        tokens = getattr(getattr(completion, 'usage', None), 'total_tokens', None)
-        if isinstance(tokens, int):
-            self.usage_known = True
-            self.usage += tokens
+        if not self._count(getattr(completion, 'usage', None)):
+            self.unknown_calls += 1
         if not completion.choices:
             raise NarrativeGenerationError('Azure returned no choices')
         choice = completion.choices[0]

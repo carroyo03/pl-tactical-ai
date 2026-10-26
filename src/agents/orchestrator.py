@@ -134,7 +134,7 @@ class GuardrailCriticAgent:
             return False
 
     def fallback(self, state: OrchestrationState) -> None:
-        if state.telemetry.generation_provider == 'GROQ':
+        if state.telemetry.generation_provider in ('GROQ', 'AZURE_OPENAI'):
             creative = MockLLMClient().generate(system_prompt=SYSTEM_PROMPT, context=state.context)
             state.proposal = creative.model_dump()
             state.generation_error = None
