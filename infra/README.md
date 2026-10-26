@@ -144,7 +144,9 @@ When `enableGroq` is true the studio receives `LLM_PROVIDER=groq` and the key as
 Container Apps secret. The studio still reads episodes from the internal API, but
 commentary and review scenarios are generated inside the studio process; the API
 never receives a model key or a deliberately altered draft. Keep the Groq
-organization on the Free plan with billing disabled.
+organization on the Free plan with billing disabled. Bicep cannot require the key
+when `enableGroq` is true, so always set both; with an empty key the studio shows
+"AI commentary is not configured" and keeps the offline preview.
 
 Operational limits to know before a public link is shared:
 
