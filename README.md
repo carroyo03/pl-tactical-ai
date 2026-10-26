@@ -433,5 +433,10 @@ controls. The public deployment keeps paid model selection disabled and adds
 service authentication, bounded processing and operational monitoring. Runtime
 settings and credentials are kept outside version control. Azure Container Apps
 hosting has been verified as documented in
-[the deployment guide](infra/README.md). Real model deployment and provider
-quality/latency evaluation remain pending.
+[the deployment guide](infra/README.md). An Azure OpenAI deployment has been exercised
+with a small synthetic evaluation (see `scripts/evaluate_providers.py`); broader quality,
+latency and cost evaluation remains pending.
+
+## License
+
+Released under the [MIT License](LICENSE).
