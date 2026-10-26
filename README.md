@@ -2,9 +2,9 @@
 
 [![CI](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/carroyo03/pl-tactical-ai/actions/workflows/ci.yml)
 
-**[Open the Azure demo](https://pl-tactical-demo-studio.happyhill-6f6f935b.germanywestcentral.azurecontainerapps.io)**
-— fictional goal sequences with offline narration. The app can scale to zero, so
-the first visit may take longer to load.
+A demo is deployed on Azure Container Apps with fictional goal sequences. Its address
+is shared with reviewers in the submission rather than listed in this repository. The
+app can scale to zero, so the first visit may take longer to load.
 
 PL Tactical AI is an explainable football analysis and commentary prototype for
 analysts and broadcast teams. It turns structured goal-sequence events into an
@@ -41,9 +41,9 @@ correction and fallback paths can be inspected step by step.
   snapshot; passing connections are inferred; difficulty is a heuristic score,
   not a calibrated completion probability.
 - **Works without cloud credentials:** the default narrator uses reviewed offline
-  templates. Opt-in Groq narration is available locally and has undergone a small
-  synthetic evaluation. The published Azure demo remains offline. An Azure OpenAI
-  adapter is implemented, but a real Azure model deployment remains unvalidated.
+  templates. Opt-in Azure OpenAI and Groq narration are available; each has had a small
+  synthetic evaluation (Azure: 18 cases with `gpt-4.1-mini`, not a production benchmark).
+  The deployed Azure demo is configured for Azure OpenAI through a managed identity.
 
 The application combines **Python, FastAPI, Streamlit, DuckDB, NetworkX, Plotly
 and Pydantic**, with a custom three-role orchestration workflow. The offline mode

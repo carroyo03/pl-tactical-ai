@@ -7,12 +7,16 @@ deploy a language model or configure Foundry orchestration.
 
 ## Deployed demo
 
-The demo is hosted in `rg-pl-tactical-demo` in Germany West Central:
+The demo is hosted in `rg-pl-tactical-demo` in Germany West Central. Its public
+address is intentionally not listed in this repository.
 
-- [Broadcast Studio](https://pl-tactical-demo-studio.happyhill-6f6f935b.germanywestcentral.azurecontainerapps.io)
+- Studio: public ingress; one replica.
 - API: internal ingress only, within the same Container Apps environment.
-- Narration: offline mock; no model credentials or paid model requests.
-- Image: `ghcr.io/carroyo03/pl-tactical-ai@sha256:27f178ebf898f92abf530f7a642a85bfbc4e63ae352a528a1101319c519f38c4`.
+- Narration: Azure OpenAI (`gpt-41-mini`) called by the studio with its system-assigned
+  managed identity, enabled with `enableAzureOpenAI`; no key is stored. Requests spend
+  subscription credit and are bounded as described below. Without that parameter the
+  studio and API use the offline mock.
+- Image: `ghcr.io/carroyo03/pl-tactical-ai@sha256:a08960e491637e5e30b46982773be0a486449d11e7c4cd981a815470346d946a`.
 
 Azure provisioned an Express environment. Sticky-session configuration is omitted
 because Express does not support it; the studio is limited to one replica.
