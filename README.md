@@ -185,6 +185,10 @@ uv run python -m src.ingest.mock_generator
 Unknown goals return 404; unsupported persona/language values return 422.
 The default narrator is offline. Setting all three of `AZURE_OPENAI_ENDPOINT`,
 `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_DEPLOYMENT` selects Azure instead.
+Alternatively, set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` and
+`AZURE_OPENAI_AUTH=entra` (no key) to sign in with Microsoft Entra ID through
+`DefaultAzureCredential`: Azure CLI locally, or a managed identity in Azure. The
+identity needs the **Cognitive Services OpenAI User** role on the resource.
 `AZURE_OPENAI_API_VERSION` defaults to `2024-10-21`; the deployment must support
 Structured Outputs. Export variables in the process environment; `.env` files
 are not loaded automatically. Partial Azure configuration uses the Mock.

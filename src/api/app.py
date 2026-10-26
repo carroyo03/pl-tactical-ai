@@ -51,11 +51,21 @@ def create_app(
                 endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
                 api_key = os.getenv('AZURE_OPENAI_API_KEY', '').strip()
                 deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', '').strip()
-                if endpoint and api_key and deployment and os.getenv('DISABLE_PAID_MODELS', '').lower() != 'true':
+                # Keyless Microsoft Entra ID sign-in is an explicit opt-in; an API key stays the default.
+                entra = os.getenv('AZURE_OPENAI_AUTH', '').strip().lower() == 'entra'
+                if endpoint and (api_key or entra) and deployment and os.getenv('DISABLE_PAID_MODELS', '').lower() != 'true':
                     from openai import AzureOpenAI
 
+                    credentials = {'api_key': api_key}
+                    if entra and not api_key:
+                        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+
+                        credential = DefaultAzureCredential()
+                        resources.callback(credential.close)
+                        credentials = {'azure_ad_token_provider': get_bearer_token_provider(
+                            credential, 'https://cognitiveservices.azure.com/.default')}
                     sdk = AzureOpenAI(
-                        azure_endpoint=endpoint, api_key=api_key,
+                        azure_endpoint=endpoint, **credentials,
                         api_version=os.getenv('AZURE_OPENAI_API_VERSION', DEFAULT_API_VERSION),
                         timeout=AZURE_REQUEST_TIMEOUT_SEC, max_retries=0,
                     )

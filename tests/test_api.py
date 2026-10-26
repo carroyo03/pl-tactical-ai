@@ -120,5 +120,27 @@ class LifecycleTests(unittest.TestCase):
             sdk.close.assert_called_once_with()
 
 
+    def test_entra_sign_in_is_explicit_and_keyless(self):
+        environment = {
+            'AZURE_OPENAI_ENDPOINT': 'https://example.openai.azure.com',
+            'AZURE_OPENAI_AUTH': 'entra',
+            'AZURE_OPENAI_DEPLOYMENT': 'test-gpt41',
+        }
+        sdk_type, credential_type, provider = MagicMock(), MagicMock(), MagicMock()
+        with patch.dict('os.environ', environment, clear=True), patch('openai.AzureOpenAI', sdk_type), patch(
+                'azure.identity.DefaultAzureCredential', credential_type), patch(
+                'azure.identity.get_bearer_token_provider', provider):
+            with TestClient(create_app()):
+                kwargs = sdk_type.call_args.kwargs
+                self.assertNotIn('api_key', kwargs)
+                self.assertIs(kwargs['azure_ad_token_provider'], provider.return_value)
+                self.assertEqual(provider.call_args.args[1], 'https://cognitiveservices.azure.com/.default')
+            credential_type.return_value.close.assert_called_once_with()
+        # Without the explicit opt-in, no key means the offline mock.
+        with patch.dict('os.environ', {**environment, 'AZURE_OPENAI_AUTH': ''}, clear=True):
+            with TestClient(create_app()) as http:
+                self.assertIsInstance(http.app.state.narrator.client, MockLLMClient)
+
+
 if __name__ == '__main__':
     unittest.main()
