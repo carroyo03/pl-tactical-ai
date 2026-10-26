@@ -24,7 +24,7 @@ class Handoff(StrictModel):
     reason: str
 
 
-Provider = Literal['OFFLINE_MOCK', 'AZURE_OPENAI', 'OFFLINE_FALLBACK', 'CUSTOM', 'UNKNOWN']
+Provider = Literal['OFFLINE_MOCK', 'AZURE_OPENAI', 'GROQ', 'OFFLINE_FALLBACK', 'CUSTOM', 'UNKNOWN']
 
 
 class ExecutionTelemetry(StrictModel):
@@ -35,6 +35,11 @@ class ExecutionTelemetry(StrictModel):
     status: Literal['RUNNING', 'SUCCESS', 'RECOVERED', 'DEGRADED_FALLBACK'] = 'RUNNING'
     generation_provider: Provider = 'UNKNOWN'
     narrative_provider: Provider = 'UNKNOWN'
+    model: str | None = None
+    cache_hit: bool = False
+    generation_latency_ms: float | None = None
+    provider_calls: int = 0
+    total_tokens: int | None = None
 
 
 class OrchestrationState(StrictModel):
@@ -50,6 +55,7 @@ class OrchestrationState(StrictModel):
     tactical_breakdown: str = ''
     proposal: dict | None = None
     generation_error: str | None = None
+    retry_allowed: bool = True
     narrative: NarrativeOutput | None = None
     telemetry: ExecutionTelemetry = Field(default_factory=ExecutionTelemetry)
 
@@ -104,6 +110,7 @@ class PersonaNarratorAgent:
         except (ValidationError, NarrativeGenerationError) as error:
             # SDK schema failures and explicit refusals are recoverable; bugs propagate.
             state.generation_error = str(error)
+            state.retry_allowed = getattr(error, 'retryable', True)
 
 
 class GuardrailCriticAgent:
@@ -123,6 +130,14 @@ class GuardrailCriticAgent:
             return False
 
     def fallback(self, state: OrchestrationState) -> None:
+        if state.telemetry.generation_provider == 'GROQ':
+            creative = MockLLMClient().generate(system_prompt=SYSTEM_PROMPT, context=state.context)
+            state.proposal = creative.model_dump()
+            state.generation_error = None
+            if self.audit(state):
+                state.telemetry.status = 'DEGRADED_FALLBACK'
+                state.telemetry.narrative_provider = 'OFFLINE_FALLBACK'
+                return
         # Fixed short headline remains valid even with unusually long player names.
         names = list(dict.fromkeys(state.grounding['required_names'] + (
             [state.focus.player_name] if state.focus.participated else [])))
@@ -156,7 +171,7 @@ class BroadcastOrchestrator:
             focus_player_id=focus_player_id,
         )
         provider = getattr(self.narrator.client, 'provider', 'CUSTOM')
-        state.telemetry.generation_provider = provider if provider in ('OFFLINE_MOCK', 'AZURE_OPENAI') else 'CUSTOM'
+        state.telemetry.generation_provider = provider if provider in ('OFFLINE_MOCK', 'AZURE_OPENAI', 'GROQ') else 'CUSTOM'
         self.analyst.run(state)
         state.telemetry.handoffs.append(Handoff(
             from_agent='TacticalAnalystAgent', to_agent='PersonaNarratorAgent', attempt=1,
@@ -171,6 +186,13 @@ class BroadcastOrchestrator:
             if self.critic.audit(state):
                 state.telemetry.status = 'SUCCESS' if attempt == 1 else 'RECOVERED'
                 state.telemetry.narrative_provider = state.telemetry.generation_provider
+                break
+            if not state.retry_allowed:
+                self.critic.fallback(state)
+                state.telemetry.handoffs.append(Handoff(
+                    from_agent='GuardrailCriticAgent', to_agent='DeterministicFallback', attempt=attempt,
+                    reason='Generation unavailable; validated offline explanation selected',
+                ))
                 break
             if attempt == 1:
                 state.telemetry.handoffs.append(Handoff(

@@ -240,7 +240,7 @@ PERSONA_LABELS = {
 
 
 PROVIDER_LABELS = {
-    'OFFLINE_MOCK': 'Offline mock', 'AZURE_OPENAI': 'Azure OpenAI',
+    'GROQ': 'Groq', 'OFFLINE_MOCK': 'Offline mock', 'AZURE_OPENAI': 'Azure OpenAI',
     'OFFLINE_FALLBACK': 'Offline fallback', 'CUSTOM': 'Custom client', 'UNKNOWN': 'Provider not reported',
 }
 
@@ -279,16 +279,36 @@ def render_critic_review(telemetry, review: DemoReview | None) -> None:
         st.markdown('**What the recorded events support**')
         st.text(review.evidence_explanation)
     else:
+        availability = {
+            'provider_cooldown': 'The model allowance or local capacity was temporarily unavailable. No further model request was made.',
+            'provider_quota': 'The provider reported a temporary usage limit. A prepared explanation was selected instead of waiting.',
+            'provider_configuration': 'The model connection needs an operator configuration check. Repeating the same request would not resolve it.',
+            'provider_timeout': 'The model did not respond within the available time.',
+            'provider_connection': 'The model service could not be reached.',
+            'provider_unavailable': 'The model service was temporarily unavailable.',
+            'generation_deadline': 'The available generation time or capacity was exhausted before another model request could begin.',
+            'generation_cancelled': 'The request was interrupted. No further generation was started.',
+            'provider_invalid_output': 'The response did not meet the required format or evidence limitations.',
+            'provider_incomplete': 'The model did not return a complete, usable explanation.',
+            'provider_empty': 'The model returned no explanation.',
+            'input_limit': 'The supplied evidence exceeded the configured model input limit.',
+        }
         for number, feedback in enumerate(telemetry.critic_feedback, 1):
-            st.markdown(f'**Draft {number} was rejected**')
-            st.text(explain_critic_feedback(feedback))
+            if feedback in availability:
+                st.markdown(f'**Attempt {number} could not provide an accepted explanation**')
+                st.text(availability[feedback])
+            else:
+                st.markdown(f'**Draft {number} was rejected**')
+                st.text(explain_critic_feedback(feedback))
 
 
 def main() -> None:
     st.set_page_config(page_title='Touchline / Broadcast Studio', layout='wide', initial_sidebar_state='collapsed')
     st.markdown(CSS, unsafe_allow_html=True)
     service = StudioService(os.getenv('API_BASE_URL') or None)
-    source = 'Remote API' if service.api_base_url else 'Local / offline'
+    from src.agents.groq_client import enabled, DEFAULT_MODEL
+    real_local = enabled() and not service.api_base_url
+    source = 'Local / Groq' if real_local else 'Remote API' if service.api_base_url else 'Local / offline'
     with st.container(key='studio_header'):
         title_column, help_column = st.columns([6, 1], vertical_alignment='center')
         title_column.markdown('<div class="studio-bar"><h1>Broadcast studio</h1></div>', unsafe_allow_html=True)
@@ -376,22 +396,52 @@ def main() -> None:
         + (Path(__file__).resolve().parents[1] / 'analytics/evidence.py').read_bytes()
         + (Path(__file__).resolve().parents[1] / 'analytics/broadcast.py').read_bytes()
     ).hexdigest()
-    key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision)
+    key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision,
+           os.getenv('GROQ_MODEL', DEFAULT_MODEL) if real_local else None)
+    generate = False
+    if real_local and mode == 'Normal':
+        with editorial_slot:
+            generate = st.button('Generate commentary', key='generate_commentary', type='primary', width='stretch')
+            st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.')
+            if generate:
+                try:
+                    with st.spinner('Your commentary is being prepared. This may take up to 20 seconds.'):
+                        from src.ui.generation import generate_interactively
+                        progress = st.empty()
+                        try:
+                            response = generate_interactively(
+                                service, episode, persona=persona, language=language, focus_player_id=focus_id,
+                                progress=lambda: progress.caption('Your commentary is being prepared.'))
+                        finally:
+                            progress.empty()
+                    st.session_state['_groq_story'] = (key, response, persona, language)
+                except StudioServiceError as error:
+                    st.warning(str(error))
     try:
         cached = st.session_state.get('_broadcast')
         if (st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction')
                 or not hasattr(cached, 'tactical_evidence') or not hasattr(cached.telemetry, 'narrative_provider')):
-            st.session_state['_broadcast'] = service.broadcast(
-                episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
-                demo_error=demo_error or 'invented_player',
-            )
+            if real_local and mode == 'Normal':
+                from src.agents.orchestrator import BroadcastOrchestrator
+                from src.ingest.mock_generator import generate_mock_reconstruction
+                st.session_state['_broadcast'] = BroadcastOrchestrator().run(
+                    episode, persona=persona, language=language, focus_player_id=focus_id,
+                    reconstruction=generate_mock_reconstruction(episode))
+            else:
+                st.session_state['_broadcast'] = service.broadcast(
+                    episode, persona=persona, language=language, focus_player_id=focus_id, mode=mode,
+                    demo_error=demo_error or 'invented_player',
+                )
             st.session_state['_demo_review'] = service.demo_review
             st.session_state['_result_key'] = key
         result = st.session_state['_broadcast']
     except StudioServiceError as error:
         html_card(escape(str(error)))
         return
-    telemetry = result.telemetry
+    story = st.session_state.get('_groq_story') if real_local and mode == 'Normal' else None
+    commentary_result = story[1] if story else result
+    commentary_persona, commentary_language = (story[2], story[3]) if story else (persona, language)
+    telemetry = commentary_result.telemetry
     status = telemetry.status
     narrative_provider = PROVIDER_LABELS[telemetry.narrative_provider]
     generation_provider = PROVIDER_LABELS[telemetry.generation_provider]
@@ -474,25 +524,40 @@ def main() -> None:
         for item in active_overlays:
             render_overlay(item)
     with editorial_slot:
-        focus = result.focus
+        if real_local and mode == 'Normal':
+            if story and story[0] != key:
+                st.info('Your selections have changed. The previous commentary remains below; select Generate commentary to update it.')
+                st.caption('Commentary play: ' + EPISODE_LABELS.get(commentary_result.episode.goal_id, 'Previously selected play'))
+            elif not story:
+                st.info('Select Generate commentary to request an AI explanation. A prepared explanation is shown for now.')
+            if story and telemetry.status == 'DEGRADED_FALLBACK':
+                st.warning('AI commentary is currently unavailable. A prepared explanation is shown instead.')
+            if story and telemetry.cache_hit:
+                st.caption('This explanation was generated previously and passed the checks. No new model request was needed.')
+            if telemetry.model:
+                st.caption(('Requested model: ' if telemetry.status == 'DEGRADED_FALLBACK' else 'Model: ') + telemetry.model)
+        focus = commentary_result.focus
+        story_analysis = commentary_result.analysis
+        story_pivot = next((e.player_name for e in commentary_result.episode.events
+                            if e.player_id == story_analysis.tactical_pivot), 'Unavailable')
         focus_text = ('Whole team' if focus.player_id is None else
                       f'{focus.player_name} · {len(focus.event_ids)} actions' if focus.participated else
                       'External player · absent')
-        grounds = [('Packing', str(analysis.sequence_packing_score)), ('Tactical pivot', pivot),
-                   ('Breakdown zone', analysis.breakdown_zone or 'Unavailable'), ('Tactical cause', analysis.tactical_cause)]
+        grounds = [('Packing', str(story_analysis.sequence_packing_score)), ('Tactical pivot', story_pivot),
+                   ('Breakdown zone', story_analysis.breakdown_zone or 'Unavailable'), ('Tactical cause', story_analysis.tactical_cause)]
         chips = ''.join(f'<div class="fact-chip"><span class="caption">{label}</span><strong>{escape(value)}</strong></div>'
                         for label, value in grounds)
-        html_card(f'<h2 class="narrative-headline">{escape(result.narrative.headline)}</h2>'
+        html_card(f'<h2 class="narrative-headline">{escape(commentary_result.narrative.headline)}</h2>'
                   '<div class="editorial-badges">'
-                  f'<span class="editorial-pill">{escape(PERSONA_LABELS[persona])} · {language.upper()}</span>'
+                  f'<span class="editorial-pill">{escape(PERSONA_LABELS[commentary_persona])} · {commentary_language.upper()}</span>'
                   f'<span class="editorial-pill">Focus: {escape(focus_text)}</span>'
                   f'<span class="editorial-pill">Source: {narrative_provider}</span></div>'
-                  f'<p class="commentary">{escape(result.narrative.commentary)}</p>'
+                  f'<p class="commentary">{escape(commentary_result.narrative.commentary)}</p>'
                   '<div class="verified-grounds"><div class="caption">Verified tactical grounds</div>'
                   f'<div class="fact-strip">{chips}</div>'
-                  f'<span class="sr-only">{escape(result.narrative.tactical_breakdown)}</span></div>', 'editorial-card')
+                  f'<span class="sr-only">{escape(commentary_result.narrative.tactical_breakdown)}</span></div>', 'editorial-card')
         with st.expander('Why these results?', expanded=False):
-            explanations = build_analysis_explanations(result)
+            explanations = build_analysis_explanations(commentary_result)
             if not explanations:
                 st.caption('This API did not provide tactical evidence. No evidence has been inferred by the studio.')
             for title, body in explanations:
@@ -505,16 +570,21 @@ def main() -> None:
                     st.markdown('**1. The facts were established**')
                     st.caption('Tactical Analyst')
                     st.markdown(
-                        f'The synthetic events were analysed, and **{pivot}** was selected as the key connector.'
-                        if analysis.tactical_pivot else
+                        f'The synthetic events were analysed, and **{story_pivot}** was selected as the key connector.'
+                        if story_analysis.tactical_pivot else
                         'The synthetic events were analysed. No key connector could be identified from the available passing connections.'
                     )
                     st.markdown('These facts were kept unchanged throughout the review.')
                 with st.container(border=True, key='review_checks'):
-                    st.markdown('**2. A draft was prepared and checked**')
+                    st.markdown('**2. The explanation was reviewed**' if telemetry.generation_provider == 'GROQ'
+                                else '**2. A draft was prepared and checked**')
                     st.caption('Persona Narrator → Guardrail Critic')
-                    st.markdown('A draft was prepared using the selected style, language and player focus. '
-                                'Its participant names, event claims, numbers and required format were then checked.')
+                    if telemetry.generation_provider == 'GROQ' and telemetry.provider_calls == 0 and not telemetry.cache_hit:
+                        st.markdown('AI generation was unavailable before a model draft could be requested. '
+                                    'A prepared explanation was checked against the recorded facts instead.')
+                    else:
+                        st.markdown('The explanation was prepared using the selected style, language and player focus. '
+                                    'Its participant names, event claims, numbers and required format were checked before display.')
                     if telemetry.critic_feedback:
                         render_critic_review(telemetry, st.session_state.get('_demo_review') if simulated else None)
                     else:
@@ -526,7 +596,8 @@ def main() -> None:
                                     'A second draft was generated from the same facts and passed validation.')
                         st.markdown('The corrected commentary is displayed above.')
                     elif status == 'DEGRADED_FALLBACK':
-                        st.markdown('Both drafts were rejected. No further generation was attempted.')
+                        st.markdown('Both drafts were rejected. No further generation was attempted.' if simulated else
+                                    'AI generation could not provide an accepted explanation within the available attempts and time.')
                         st.markdown('An offline fallback was assembled from verified participant names and tactical facts. '
                                     'It passed validation and is displayed above.')
                     else:
@@ -540,6 +611,12 @@ def main() -> None:
         with st.expander('Technical details', expanded=False):
             st.caption('This walkthrough shows recorded steps and validation results. The implemented checks have a limited scope.')
             st.markdown(f'**Generator:** {generation_provider}')
+            if telemetry.generation_latency_ms is not None:
+                st.caption(f'Original generation and review: {telemetry.generation_latency_ms:.1f} ms. '
+                           'Current request timing may include cache retrieval instead of inference.')
+            if telemetry.model:
+                st.caption(f'Model: {telemetry.model}. Provider calls: {telemetry.provider_calls}. '
+                           f'Reused result: {telemetry.cache_hit}. Reported tokens: {telemetry.total_tokens}.')
             st.markdown(f'**Drafts requested:** {telemetry.attempts}  \n'
                         f'**Recorded handoffs:** {len(telemetry.handoffs)}  \n'
                         f'**Orchestration latency:** {telemetry.latency_ms:.2f} ms')

@@ -102,13 +102,13 @@ class StudioService:
 
     def broadcast(self, episode: GoalEpisode, *, persona='TACTICAL_ANALYST', language='en',
                   focus_player_id: str | None = None, mode: DemoMode = 'Normal',
-                  demo_error: str = 'invented_player') -> BroadcastResponse:
+                  demo_error: str = 'invented_player', cancel_event=None) -> BroadcastResponse:
         with studio_capacity():
             return self._broadcast(episode, persona=persona, language=language,
-                                   focus_player_id=focus_player_id, mode=mode, demo_error=demo_error)
+                                   focus_player_id=focus_player_id, mode=mode, demo_error=demo_error, cancel_event=cancel_event)
 
     def _broadcast(self, episode: GoalEpisode, *, persona, language, focus_player_id, mode,
-                   demo_error) -> BroadcastResponse:
+                   demo_error, cancel_event=None) -> BroadcastResponse:
         self.demo_review = None
         if mode not in DEMO_MODES:
             raise ValueError('Unknown demo mode')
@@ -123,6 +123,14 @@ class StudioService:
                 return parse_broadcast(payload, persona=persona, language=language)
             except (KeyError, TypeError, ValidationError) as error:
                 raise StudioServiceError('API returned an invalid broadcast contract.') from error
+        from src.agents.groq_client import enabled, local_runtime
+        if mode == 'Normal' and enabled():
+            try:
+                runtime = local_runtime()
+            except ValueError as error:
+                raise StudioServiceError('AI commentary is not configured. Please check the local model settings.') from error
+            return runtime.run(episode, persona=persona, language=language, focus_player_id=focus_player_id,
+                               cancel_event=cancel_event)
         client = MockLLMClient() if mode == 'Normal' else DemoLLMClient(1 if mode == DEMO_MODES[1] else 2, demo_error)
         result = BroadcastOrchestrator(client).run(
             episode, persona=persona, language=language, focus_player_id=focus_player_id,

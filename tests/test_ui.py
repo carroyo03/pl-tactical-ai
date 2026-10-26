@@ -121,6 +121,11 @@ class VisualizationTests(unittest.TestCase):
 
 
 class StudioServiceTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def test_episode_discovery_and_all_demo_modes(self):
         service = StudioService()
         ids = service.list_goal_ids()
@@ -166,6 +171,11 @@ class StudioServiceTests(unittest.TestCase):
 
 
 class StreamlitTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def create_app_test(self):
         # Streamlit 1.66 initializes AppTest state on the bare unittest thread.
         # Capture and assert that specific SDK diagnostic, not application warnings.
@@ -175,6 +185,67 @@ class StreamlitTests(unittest.TestCase):
         for record in captured.records:
             self.assertIn('missing ScriptRunContext', record.getMessage())
         return app
+
+    def test_real_model_requires_button_and_keeps_previous_selection(self):
+        from src.agents.narrator import MockLLMClient
+
+        class LocalModel(MockLLMClient):
+            provider = 'GROQ'
+
+        calls = []
+
+        def generate(service, episode, **kwargs):
+            calls.append(kwargs)
+            result = BroadcastOrchestrator(LocalModel()).run(
+                episode, persona=kwargs['persona'], language=kwargs['language'],
+                focus_player_id=kwargs['focus_player_id'])
+            result.telemetry.model = 'test-model'
+            return result
+
+        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}, clear=True), \
+                patch.object(StudioService, 'broadcast', generate):
+            app = self.create_app_test().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(calls, 'Initial display must not request model inference')
+            app.button(key='generate_commentary').click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(calls), 1)
+            old = app.session_state['_groq_story'][1].narrative.commentary
+            app.selectbox(key='language').select('es').run()
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(any('selections have changed' in item.value for item in app.info))
+            self.assertEqual(app.session_state['_groq_story'][1].narrative.commentary, old)
+            app.button(key='milestone_ev_02').click().run()
+            self.assertEqual(len(calls), 1)
+            app.button(key='generate_commentary').click().run()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[-1]['language'], 'es')
+            self.assertFalse(app.exception)
+
+    def test_model_unavailability_is_explained_without_raw_provider_errors(self):
+        from src.agents.groq_client import ProviderUnavailable
+
+        class UnavailableModel:
+            provider = 'GROQ'
+
+            def generate(self, **kwargs):
+                raise ProviderUnavailable('provider_quota')
+
+        def unavailable(service, episode, **kwargs):
+            result = BroadcastOrchestrator(UnavailableModel()).run(episode)
+            result.telemetry.model = 'test-model'
+            return result
+
+        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}, clear=True), \
+                patch.object(StudioService, 'broadcast', unavailable):
+            app = self.create_app_test().run()
+            app.button(key='generate_commentary').click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any('AI commentary is currently unavailable' in item.value for item in app.warning))
+            markup = ' '.join(item.value for item in app.markdown)
+            self.assertIn('Offline fallback', markup)
+            self.assertIn('before a model draft could be requested', markup)
+            self.assertFalse(any('Draft 1 was rejected' in item.value for item in app.markdown))
 
     def test_offline_controls_replay_caching_and_recovery(self):
         original = StudioService.broadcast
