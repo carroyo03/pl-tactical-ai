@@ -261,11 +261,55 @@ def render_overlay(item) -> None:
     )
 
 
+def render_scenario_attempts(review: DemoReview) -> None:
+    """Show, per attempt, what the provider wrote, what the app changed and what the critic decided."""
+    outcome = {'COMPLETED': 'Scenario completed: the selected error was introduced and the critic rejected it.',
+               'NOT_DETECTED': 'Scenario not detected: an altered draft was accepted.',
+               'NOT_EXECUTED': 'Scenario not executed: the intervention could not take place.'}[review.scenario_status]
+    st.markdown('**' + outcome + '**')
+    if review.scenario_note:
+        st.caption(review.scenario_note)
+    st.caption('The error is introduced by this application after the provider replies. It does not show that a model ignored an instruction.')
+    for item in review.attempts:
+        source = 'Groq' if item.provider == 'GROQ' else 'Offline mock'
+        with st.container(border=True):
+            st.markdown(f'**Attempt {item.attempt}** · {source}' + (f' · {item.model}' if item.model else ''))
+            if item.original_commentary is None:
+                st.markdown('**No draft was returned.**')
+                st.text(explain_critic_feedback(item.feedback or '') if item.feedback else item.note)
+                continue
+            st.markdown('**1. The provider prepared a draft.**')
+            with st.expander('Original draft', expanded=False):
+                st.text(item.original_headline)
+                st.text(item.original_commentary)
+            if item.targeted and item.modification_applied:
+                st.markdown(f'**2. A selected error was deliberately introduced.** {item.note}.')
+                with st.expander('Draft sent to the critic', expanded=False):
+                    st.text(item.audited_headline)
+                    st.text(item.audited_commentary)
+            elif item.targeted:
+                st.markdown('**2. The selected error could not be applied.**')
+                st.text(item.note)
+            else:
+                st.markdown('**2. No error was introduced in this draft.**')
+            if item.feedback:
+                st.markdown('**3. The critic rejected the draft.**')
+                st.text(explain_critic_feedback(item.feedback))
+            else:
+                st.markdown('**3. The critic accepted the draft.**')
+    if review.evidence_explanation:
+        st.divider()
+        st.markdown('**What the recorded events support**')
+        st.text(review.evidence_explanation)
+
+
 def render_critic_review(telemetry, review: DemoReview | None) -> None:
     """Explain recorded rejections inline within the guided review."""
-    if not telemetry.critic_feedback:
+    if review is not None and review.attempts:
+        render_scenario_attempts(review)
+    elif not telemetry.critic_feedback:
         return
-    if review is not None:
+    elif review is not None:
         st.caption('These drafts were deliberately made incorrect for this local demonstration. They were not published as commentary.')
         for index, draft in enumerate(review.rejected_drafts, 1):
             with st.container(border=True):
@@ -379,7 +423,8 @@ def main() -> None:
                     st.session_state['demo_error'] = options[0]
                 demo_error = st.selectbox('What should go wrong in the draft?', options, key='demo_error',
                                            format_func=DEMO_ERRORS.get)
-                st.caption('This demonstration runs locally. An incorrect draft is deliberately introduced so the critic’s response can be inspected.')
+                st.caption('This demonstration runs locally. The selected error is introduced into the provider’s draft so the critic’s response can be inspected.'
+                           + (' Each run requests the active model and is never reused from the cache.' if real_local else ''))
         telemetry_slot = st.container(key='telemetry_domain')
         technical_slot = st.container(key='technical_details')
     # Session state survives script reruns; template edits must refresh cached text.
@@ -399,10 +444,13 @@ def main() -> None:
     key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision,
            os.getenv('GROQ_MODEL', DEFAULT_MODEL) if real_local else None)
     generate = False
-    if real_local and mode == 'Normal':
+    if real_local:
         with editorial_slot:
-            generate = st.button('Generate commentary', key='generate_commentary', type='primary', width='stretch')
-            st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.')
+            generate = st.button('Generate commentary' if mode == 'Normal' else 'Run review scenario',
+                                 key='generate_commentary', type='primary', width='stretch')
+            st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.'
+                       if mode == 'Normal' else
+                       'Uses up to two model requests from the free allowance. Scenario results are not reused.')
             if generate:
                 try:
                     with st.spinner('Your commentary is being prepared. This may take up to 20 seconds.'):
@@ -411,17 +459,18 @@ def main() -> None:
                         try:
                             response = generate_interactively(
                                 service, episode, persona=persona, language=language, focus_player_id=focus_id,
+                                mode=mode, demo_error=demo_error or 'invented_player',
                                 progress=lambda: progress.caption('Your commentary is being prepared.'))
                         finally:
                             progress.empty()
-                    st.session_state['_groq_story'] = (key, response, persona, language)
+                    st.session_state['_groq_story'] = (key, response, persona, language, service.demo_review)
                 except StudioServiceError as error:
                     st.warning(str(error))
     try:
         cached = st.session_state.get('_broadcast')
         if (st.session_state.get('_result_key') != key or not hasattr(cached, 'reconstruction')
                 or not hasattr(cached, 'tactical_evidence') or not hasattr(cached.telemetry, 'narrative_provider')):
-            if real_local and mode == 'Normal':
+            if real_local:
                 from src.agents.orchestrator import BroadcastOrchestrator
                 from src.ingest.mock_generator import generate_mock_reconstruction
                 st.session_state['_broadcast'] = BroadcastOrchestrator().run(
@@ -438,14 +487,15 @@ def main() -> None:
     except StudioServiceError as error:
         html_card(escape(str(error)))
         return
-    story = st.session_state.get('_groq_story') if real_local and mode == 'Normal' else None
+    story = st.session_state.get('_groq_story') if real_local else None
     commentary_result = story[1] if story else result
     commentary_persona, commentary_language = (story[2], story[3]) if story else (persona, language)
     telemetry = commentary_result.telemetry
     status = telemetry.status
     narrative_provider = PROVIDER_LABELS[telemetry.narrative_provider]
     generation_provider = PROVIDER_LABELS[telemetry.generation_provider]
-    simulated = mode != 'Normal'
+    story_review = story[4] if story and len(story) > 4 else None
+    simulated = story_review is not None if real_local else mode != 'Normal'
     analysis, metrics = result.analysis, result.broadcast_metrics
     pivot = next((event.player_name for event in episode.events if event.player_id == analysis.tactical_pivot), 'Unavailable')
     values = [
@@ -524,7 +574,7 @@ def main() -> None:
         for item in active_overlays:
             render_overlay(item)
     with editorial_slot:
-        if real_local and mode == 'Normal':
+        if real_local:
             if story and story[0] != key:
                 st.info('Your selections have changed. The previous commentary remains below; select Generate commentary to update it.')
                 st.caption('Commentary play: ' + EPISODE_LABELS.get(commentary_result.episode.goal_id, 'Previously selected play'))
@@ -585,8 +635,9 @@ def main() -> None:
                     else:
                         st.markdown('The explanation was prepared using the selected style, language and player focus. '
                                     'Its participant names, event claims, numbers and required format were checked before display.')
-                    if telemetry.critic_feedback:
-                        render_critic_review(telemetry, st.session_state.get('_demo_review') if simulated else None)
+                    scenario_review = (story_review if real_local else st.session_state.get('_demo_review')) if simulated else None
+                    if telemetry.critic_feedback or (scenario_review is not None and scenario_review.attempts):
+                        render_critic_review(telemetry, (story_review if real_local else st.session_state.get('_demo_review')) if simulated else None)
                     else:
                         st.markdown('**No rejection was recorded.** The first draft passed the implemented checks.')
                 with st.container(border=True, key='review_selection'):

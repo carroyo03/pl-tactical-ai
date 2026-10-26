@@ -370,7 +370,8 @@ class StreamlitTests(unittest.TestCase):
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             recovered_markup = ' '.join(element.value for element in app.markdown)
             self.assertIn('A second draft was generated from the same facts and passed validation.', recovered_markup)
-            self.assertIn('**Draft 1 was rejected**', recovered_markup)
+            self.assertIn('**3. The critic rejected the draft.**', recovered_markup)
+            self.assertIn('**Scenario completed: the selected error was introduced and the critic rejected it.**', recovered_markup)
             walkthrough = next(item for item in app.expander if item.label == 'Step-by-step explanation')
             self.assertFalse(walkthrough.proto.expanded)
             self.assertFalse(any(item.label == 'Test a review scenario' for item in app.expander))
@@ -424,11 +425,11 @@ class StreamlitTests(unittest.TestCase):
             app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(len(app.session_state['_demo_review'].rejected_drafts), 2)
             self.assertTrue(any('Both drafts were rejected' in item.value for item in app.markdown))
-            self.assertTrue(any('**Draft 2 was rejected**' in item.value for item in app.markdown))
+            self.assertTrue(any('**Attempt 2**' in item.value for item in app.markdown))
             app.selectbox(key='demo_mode').set_value(DEMO_MODES[0]).run()
             self.assertIsNone(app.session_state['_demo_review'])
             self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
-            self.assertFalse(any('**Draft 1 was rejected**' in item.value for item in app.markdown))
+            self.assertFalse(any('**Attempt 1**' in item.value for item in app.markdown))
             self.assertFalse(app.exception)
 
 

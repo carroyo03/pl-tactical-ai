@@ -56,6 +56,7 @@ class OrchestrationState(StrictModel):
     proposal: dict | None = None
     generation_error: str | None = None
     retry_allowed: bool = True
+    rejected_draft: dict | None = None
     narrative: NarrativeOutput | None = None
     telemetry: ExecutionTelemetry = Field(default_factory=ExecutionTelemetry)
 
@@ -104,6 +105,8 @@ class PersonaNarratorAgent:
         prompt += '\nIf focus.participated is true, mention focus.player_name in commentary. Otherwise do not invent participation.'
         if state.telemetry.critic_feedback:
             prompt += '\nRepair the previous draft according to critic_feedback in the JSON context.'
+            if state.rejected_draft is not None:
+                context['rejected_draft'] = {key: state.rejected_draft.get(key) for key in ('headline', 'commentary')}
         try:
             proposed = self.client.generate(system_prompt=prompt, context=context)
             state.proposal = proposed.model_dump()
@@ -127,6 +130,7 @@ class GuardrailCriticAgent:
             return True
         except (ValidationError, NarrativeGenerationError) as error:
             state.telemetry.critic_feedback.append(str(error))
+            state.rejected_draft = state.proposal
             return False
 
     def fallback(self, state: OrchestrationState) -> None:
@@ -155,7 +159,9 @@ class GuardrailCriticAgent:
 
 
 class BroadcastOrchestrator:
-    def __init__(self, client: LLMClient | None = None):
+    def __init__(self, client: LLMClient | None = None, modifier=None):
+        # An optional DraftModifier alters usable drafts before the unchanged critic reviews them.
+        self.modifier = modifier
         self.analyst = TacticalAnalystAgent()
         self.narrator = PersonaNarratorAgent(client if client is not None else MockLLMClient())
         self.critic = GuardrailCriticAgent()
@@ -179,6 +185,12 @@ class BroadcastOrchestrator:
         ))
         for attempt in (1, 2):
             self.narrator.run(state)
+            if self.modifier is not None:
+                if state.proposal is not None:
+                    state.proposal = self.modifier.apply(
+                        attempt, state.proposal, state.context, state.grounding['required_names'])
+                else:
+                    self.modifier.record_unavailable(attempt, state.generation_error)
             state.telemetry.handoffs.append(Handoff(
                 from_agent='PersonaNarratorAgent', to_agent='GuardrailCriticAgent', attempt=attempt,
                 reason='Audit generated proposal' if not state.generation_error else state.generation_error,

@@ -235,7 +235,9 @@ The top metrics and commentary describe the full episode; the pitch and overlay
 cards follow the clock. History cards remain visible and are muted. A zero-time
 focused recovery may already have an overlay at the start of replay.
 
-Agent demo modes intentionally inject invalid creative drafts locally:
+Agent demo modes alter the active provider's draft locally after it is generated
+(offline mock by default, or the local Groq model when enabled). The Guardrail Critic
+is unchanged and checks the altered text against the original facts:
 
 - Normal: regular offline generation, or the configured remote API.
 - Simulate 1 Critic Retry: first draft fails, feedback repairs the second.
@@ -247,6 +249,14 @@ Under **Test a review scenario**, in **Agent behavior**, select **The first draf
 player, an incorrect receiver, a recovery assigned to the wrong player, an
 incorrect duration, an incorrect pass accuracy, or missing scorer/connector names.
 Only cases applicable to the selected episode are offered.
+
+With Groq enabled, a scenario is started by an explicit **Run review scenario** button,
+uses at most two model requests and is never served from the cache. The error is
+introduced by the application, so a recovery shows the pipeline's resilience, not that
+a model ignored an instruction. Each attempt records the provider draft, the alteration
+(or why it could not be applied), and the critic's verdict. The scenario outcome
+(completed, not detected, or not executed, for example after a provider failure) is
+reported separately from the commentary outcome.
 
 The review shows the actual rejected draft, an explanation of the recorded
 validator feedback, and the episode facts that contradict the draft. A final
