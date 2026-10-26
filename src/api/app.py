@@ -9,6 +9,7 @@ from src.agents.narrator import (
     AZURE_REQUEST_TIMEOUT_SEC, AzureOpenAIClient, Language, LLMClient, MockLLMClient,
     NarrativeGenerationError, NarrativeOutput, Persona, PersonaNarrator,
 )
+from src.agents.azure_runtime import azure_settings, create_azure_sdk, paid_models_disabled
 from src.analytics.schemas import GoalEpisode, StrictModel, TacticalAnalysisResponse
 from src.analytics.tactical_engine import TacticalEngine
 from src.ingest.repository import DuckDBRepository
@@ -17,7 +18,6 @@ from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 from src.api.security import APISecurityMiddleware, AdmissionControl, SecuritySettings, log_broadcast
 
 DEFAULT_SAMPLE_PATH = Path(__file__).resolve().parents[2] / 'data/raw/sample_goal_episode.json'
-DEFAULT_API_VERSION = '2024-10-21'
 
 
 class GoalIntelligenceResponse(StrictModel):
@@ -48,29 +48,12 @@ def create_app(
                 repository.load_json(sample_path)
             selected_client = client
             if selected_client is None:
-                endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', '').strip()
-                api_key = os.getenv('AZURE_OPENAI_API_KEY', '').strip()
-                deployment = os.getenv('AZURE_OPENAI_DEPLOYMENT', '').strip()
-                # Keyless Microsoft Entra ID sign-in is an explicit opt-in; an API key stays the default.
-                entra = os.getenv('AZURE_OPENAI_AUTH', '').strip().lower() == 'entra'
-                if endpoint and (api_key or entra) and deployment and os.getenv('DISABLE_PAID_MODELS', '').lower() != 'true':
-                    from openai import AzureOpenAI
-
-                    credentials = {'api_key': api_key}
-                    if entra and not api_key:
-                        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-
-                        credential = DefaultAzureCredential()
-                        resources.callback(credential.close)
-                        credentials = {'azure_ad_token_provider': get_bearer_token_provider(
-                            credential, 'https://cognitiveservices.azure.com/.default')}
-                    sdk = AzureOpenAI(
-                        azure_endpoint=endpoint, **credentials,
-                        api_version=os.getenv('AZURE_OPENAI_API_VERSION', DEFAULT_API_VERSION),
-                        timeout=AZURE_REQUEST_TIMEOUT_SEC, max_retries=0,
-                    )
-                    resources.callback(sdk.close)
-                    selected_client = AzureOpenAIClient(sdk, deployment)
+                settings = azure_settings()
+                if settings is not None and not paid_models_disabled():
+                    sdk, closers = create_azure_sdk(settings)
+                    for close in closers:
+                        resources.callback(close)
+                    selected_client = AzureOpenAIClient(sdk, settings.deployment)
                 else:
                     selected_client = MockLLMClient()
             app.state.repository = repository

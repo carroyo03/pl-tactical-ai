@@ -32,6 +32,15 @@ param enableGroq bool = false
 @secure()
 param groqApiKey string = ''
 
+@description('Opt in to Azure OpenAI narration inside the studio, using its managed identity. Takes precedence over Groq.')
+param enableAzureOpenAI bool = false
+
+@description('OpenAI endpoint of the model resource, for example https://<resource>.openai.azure.com/.')
+param azureOpenAIEndpoint string = ''
+
+@description('Name of the model deployment, for example gpt-41-mini.')
+param azureOpenAIDeployment string = ''
+
 @allowed([
   'openai/gpt-oss-20b'
   'openai/gpt-oss-120b'
@@ -48,7 +57,7 @@ var studioSecrets = concat(
       value: serviceToken
     }
   ],
-  enableGroq ? [
+  enableGroq && !enableAzureOpenAI ? [
     {
       name: 'groq-api-key'
       value: groqApiKey
@@ -60,6 +69,14 @@ var studioGroqEnv = enableGroq ? [
   { name: 'GROQ_API_KEY', secretRef: 'groq-api-key' }
   { name: 'GROQ_MODEL', value: groqModel }
 ] : []
+var studioAzureEnv = [
+  { name: 'LLM_PROVIDER', value: 'azure' }
+  { name: 'AZURE_OPENAI_ENDPOINT', value: azureOpenAIEndpoint }
+  { name: 'AZURE_OPENAI_DEPLOYMENT', value: azureOpenAIDeployment }
+  { name: 'AZURE_OPENAI_AUTH', value: 'entra' }
+]
+// Secrets are only added for the provider that is selected.
+var studioProviderEnv = enableAzureOpenAI ? studioAzureEnv : studioGroqEnv
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${namePrefix}-logs'
@@ -188,6 +205,9 @@ resource api 'Microsoft.App/containerApps@2025-01-01' = {
 resource studio 'Microsoft.App/containerApps@2025-01-01' = {
   name: studioName
   location: location
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     managedEnvironmentId: environment.id
     workloadProfileName: 'Consumption'
@@ -221,7 +241,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
               name: 'API_BASE_URL'
               value: 'https://${api.properties.configuration.ingress.fqdn}'
             }
-          ], studioGroqEnv)
+          ], studioProviderEnv)
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'
@@ -252,3 +272,6 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
 output studioUrl string = 'https://${studio.properties.configuration.ingress.fqdn}'
 output apiInternalUrl string = 'https://${api.properties.configuration.ingress.fqdn}'
 output monitoringWorkspaceId string = workspace.id
+
+@description('Grant this principal the Cognitive Services OpenAI User role on the model resource.')
+output studioPrincipalId string = studio.identity.principalId

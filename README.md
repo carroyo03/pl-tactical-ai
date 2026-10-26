@@ -185,6 +185,8 @@ uv run python -m src.ingest.mock_generator
 Unknown goals return 404; unsupported persona/language values return 422.
 The default narrator is offline. Setting all three of `AZURE_OPENAI_ENDPOINT`,
 `AZURE_OPENAI_API_KEY`, and `AZURE_OPENAI_DEPLOYMENT` selects Azure instead.
+To use Azure OpenAI inside the studio (commentary and review scenarios), also set
+`LLM_PROVIDER=azure`; see [Azure demo deployment](infra/README.md).
 Alternatively, set `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT` and
 `AZURE_OPENAI_AUTH=entra` (no key) to sign in with Microsoft Entra ID through
 `DefaultAzureCredential`: Azure CLI locally, or a managed identity in Azure. The

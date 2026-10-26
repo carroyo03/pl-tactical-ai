@@ -124,6 +124,48 @@ The public demo keeps paid model selection explicitly disabled. Enabling a paid
 provider requires a separate access and cost review. See the application settings
 and Azure resource configuration for deployment-specific operational values.
 
+## Optional Azure OpenAI narration in the studio
+
+The studio can call an Azure OpenAI (Foundry) model deployment with its own
+system-assigned managed identity, so no API key is stored. Add these values to the
+private parameters file:
+
+```json
+"enableAzureOpenAI": { "value": true },
+"azureOpenAIEndpoint": { "value": "https://<resource>.openai.azure.com/" },
+"azureOpenAIDeployment": { "value": "<deployment name>" }
+```
+
+Use the resource's `openai.azure.com` host; the generic `cognitiveservices.azure.com`
+host returned `PermissionDenied` in our test. When `enableAzureOpenAI` is true it takes
+precedence over Groq, and the studio gets `LLM_PROVIDER=azure` and
+`AZURE_OPENAI_AUTH=entra`. Commentary and review scenarios are generated in the studio
+process; the API stays offline.
+
+After the first deployment, grant the studio identity access to the model resource
+(the template cannot do this because the resource may live in another resource group):
+
+```sh
+PRINCIPAL=$(az deployment group show -g rg-pl-tactical-demo -n main \
+  --query properties.outputs.studioPrincipalId.value -o tsv)
+az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+  --role "Cognitive Services OpenAI User" \
+  --scope "$(az cognitiveservices account show -g <model-rg> -n <resource> --query id -o tsv)"
+```
+
+Role changes can take several minutes to apply. Every request spends subscription
+credit; there is no result cache, concurrency is capped at two requests, and each
+request makes at most two model calls of ten seconds each. Keep the monthly budget
+alert enabled.
+
+## Provider evaluation
+
+`scripts/evaluate_providers.py` runs 18 synthetic cases (3 plays, 2 languages, 3
+styles) per provider and reports first-pass and validated rates, latency percentiles,
+provider calls and tokens. Latency is reported separately for each provider and is not
+comparable across them. Azure needs `--confirm-spend`, paces requests, and saves a
+private report in `.deployment-local/`.
+
 ## Optional Groq narration in the studio
 
 Azure OpenAI quota is not available for this project, so the studio can run the

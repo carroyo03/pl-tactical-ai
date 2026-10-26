@@ -7,7 +7,7 @@ import os
 import streamlit as st
 
 from src.agents import narrator as narrator_module
-from src.ui.service import DEMO_MODES, StudioService, StudioServiceError
+from src.ui.service import DEMO_MODES, StudioService, StudioServiceError, active_model, active_provider
 from src.ui.demos import DEMO_ERRORS, DemoReview, available_demo_errors, explain_critic_feedback
 from src.ui.visualization import (
     build_analysis_explanations, build_event_timeline, build_goal_summary, build_pitch_figure, filter_synchronized_overlays,
@@ -271,7 +271,7 @@ def render_scenario_attempts(review: DemoReview) -> None:
         st.caption(review.scenario_note)
     st.caption('The error is introduced by this application after the provider replies. It does not show that a model ignored an instruction.')
     for item in review.attempts:
-        source = 'Groq' if item.provider == 'GROQ' else 'Offline mock'
+        source = PROVIDER_LABELS.get(item.provider, 'Offline mock')
         with st.container(border=True):
             st.markdown(f'**Attempt {item.attempt}** · {source}' + (f' · {item.model}' if item.model else ''))
             if item.original_commentary is None:
@@ -350,9 +350,10 @@ def main() -> None:
     st.set_page_config(page_title='Touchline / Broadcast Studio', layout='wide', initial_sidebar_state='collapsed')
     st.markdown(CSS, unsafe_allow_html=True)
     service = StudioService(os.getenv('API_BASE_URL') or None)
-    from src.agents.groq_client import enabled, DEFAULT_MODEL
-    real_local = enabled()
-    source = ('Groq / Remote API data' if service.api_base_url else 'Local / Groq') if real_local else (
+    provider_id = active_provider()
+    real_local = provider_id is not None
+    provider_name = {'GROQ': 'Groq', 'AZURE_OPENAI': 'Azure OpenAI'}.get(provider_id, '')
+    source = (f'{provider_name} / Remote API data' if service.api_base_url else f'Local / {provider_name}') if real_local else (
         'Remote API' if service.api_base_url else 'Local / offline')
     with st.container(key='studio_header'):
         title_column, help_column = st.columns([6, 1], vertical_alignment='center')
@@ -448,16 +449,20 @@ def main() -> None:
         + (Path(__file__).resolve().parents[1] / 'analytics/broadcast.py').read_bytes()
     ).hexdigest()
     key = (episode_key, persona, language, focus_id, mode, demo_error, template_revision,
-           os.getenv('GROQ_MODEL', DEFAULT_MODEL) if real_local else None)
+           active_model() if real_local else None)
     generate = False
     action_label = 'Generate commentary' if mode == 'Normal' else 'Run review scenario'
     if real_local:
         with editorial_slot:
             generate = st.button(action_label, key='generate_commentary', type='primary', width='stretch',
                                  icon=':material/play_arrow:' if mode == 'Normal' else ':material/rule:')
-            st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.'
-                       if mode == 'Normal' else
-                       'Uses up to two model requests from the free allowance. Scenario results are not reused.')
+            if provider_id == 'AZURE_OPENAI':
+                st.caption('Each request uses your Azure OpenAI deployment and spends Azure credit; results are not reused.'
+                           + ('' if mode == 'Normal' else ' A scenario makes up to two requests.'))
+            else:
+                st.caption('Uses the free model allowance only when requested. Identical validated results may be reused.'
+                           if mode == 'Normal' else
+                           'Uses up to two model requests from the free allowance. Scenario results are not reused.')
             if generate:
                 try:
                     with st.spinner('Your commentary is being prepared. This may take up to 20 seconds.' if mode == 'Normal'
@@ -646,10 +651,10 @@ def main() -> None:
                     )
                     st.markdown('These facts were kept unchanged throughout the review.')
                 with st.container(border=True, key='review_checks'):
-                    st.markdown('**2. The explanation was reviewed**' if telemetry.generation_provider == 'GROQ'
+                    st.markdown('**2. The explanation was reviewed**' if telemetry.generation_provider in ('GROQ', 'AZURE_OPENAI')
                                 else '**2. A draft was prepared and checked**')
                     st.caption('Persona Narrator → Guardrail Critic')
-                    if telemetry.generation_provider == 'GROQ' and telemetry.provider_calls == 0 and not telemetry.cache_hit:
+                    if telemetry.generation_provider in ('GROQ', 'AZURE_OPENAI') and telemetry.provider_calls == 0 and not telemetry.cache_hit:
                         st.markdown('AI generation was unavailable before a model draft could be requested. '
                                     'A prepared explanation was checked against the recorded facts instead.')
                     else:

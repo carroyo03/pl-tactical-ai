@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from pydantic import ValidationError
 
-from src.agents.narrator import MockLLMClient, PersonaNarrator
+from src.agents.narrator import MockLLMClient, NarrativeGenerationError, PersonaNarrator
 from src.agents.orchestrator import BroadcastOrchestrator, BroadcastResponse
 from src.analytics.broadcast import BroadcastMetrics
 from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
@@ -21,6 +21,26 @@ from src.api.security import AdmissionControl, SecuritySettings
 
 DemoMode = Literal['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
 DEMO_MODES = ['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
+
+
+def active_provider() -> str | None:
+    """Studio-side hosted provider selected explicitly by LLM_PROVIDER, if any."""
+    from src.agents import azure_runtime, groq_client
+    if groq_client.enabled():
+        return 'GROQ'
+    if azure_runtime.enabled():
+        return 'AZURE_OPENAI'
+    return None
+
+
+def active_model() -> str | None:
+    provider = active_provider()
+    if provider == 'GROQ':
+        from src.agents.groq_client import DEFAULT_MODEL
+        return os.getenv('GROQ_MODEL', DEFAULT_MODEL)
+    if provider == 'AZURE_OPENAI':
+        return os.getenv('AZURE_OPENAI_DEPLOYMENT', '').strip() or None
+    return None
 
 
 class StudioServiceError(ValueError):
@@ -114,10 +134,10 @@ class StudioService:
             raise ValueError('Unknown demo mode')
         if mode != 'Normal' and demo_error not in available_demo_errors(episode):
             raise ValueError('This demonstration error is not available for the episode')
-        from src.agents.groq_client import enabled, local_runtime
-        # Groq runs inside this process. When it is enabled explicitly (LLM_PROVIDER), episodes
-        # may still come from a remote API, but generation never goes through that API.
-        if self.api_base_url and mode == 'Normal' and not enabled():
+        provider = active_provider()
+        # A hosted provider runs inside this process. When it is enabled explicitly (LLM_PROVIDER),
+        # episodes may still come from a remote API, but generation never goes through that API.
+        if self.api_base_url and mode == 'Normal' and provider is None:
             params = dict(persona=persona, language=language)
             if focus_player_id is not None:
                 params['focus_player_id'] = focus_player_id
@@ -127,14 +147,29 @@ class StudioService:
             except (KeyError, TypeError, ValidationError) as error:
                 raise StudioServiceError('API returned an invalid broadcast contract.') from error
         modifier = None if mode == 'Normal' else DraftModifier(demo_error, 1 if mode == DEMO_MODES[1] else 2)
-        # Scenarios are never sent to a remote API: they use Groq here when enabled, else the offline mock.
-        if enabled():
+        # Scenarios are never sent to a remote API: they use the hosted provider here, else the offline mock.
+        if provider is not None:
+            if provider == 'GROQ':
+                from src.agents.groq_client import local_runtime
+            else:
+                from src.agents.azure_runtime import local_runtime
             try:
                 runtime = local_runtime()
             except ValueError as error:
                 raise StudioServiceError('AI commentary is not configured. Please check the local model settings.') from error
-            result = runtime.run(episode, persona=persona, language=language, focus_player_id=focus_player_id,
-                                 cancel_event=cancel_event, modifier=modifier)
+            try:
+                result = runtime.run(episode, persona=persona, language=language, focus_player_id=focus_player_id,
+                                     cancel_event=cancel_event, modifier=modifier)
+            except NarrativeGenerationError as error:
+                raise StudioServiceError(str(error)) from error
+            except Exception as error:
+                # Configuration failures (credentials, role, deployment) must be actionable, never raw.
+                from azure.core.exceptions import ClientAuthenticationError
+                from openai import APIStatusError
+                if isinstance(error, (APIStatusError, ClientAuthenticationError)):
+                    raise StudioServiceError('The model service rejected the request. Check the credentials, '
+                                             'role assignment and deployment name.') from error
+                raise
         else:
             result = BroadcastOrchestrator(MockLLMClient(), modifier).run(
                 episode, persona=persona, language=language, focus_player_id=focus_player_id,

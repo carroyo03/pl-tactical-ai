@@ -240,18 +240,18 @@ class AzureOpenAIClient:
             raise ValueError('An Azure deployment name is required')
         self.client = client
         self.deployment = deployment
+        self.usage = 0
+        self.usage_known = False
 
     def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
+        from src.agents.writing import writing_messages
         from openai import (APIConnectionError, APIStatusError, APITimeoutError,
                             LengthFinishReasonError, RateLimitError)
 
         try:
             completion = self.client.chat.completions.parse(
                 model=self.deployment,
-                messages=[
-                    {'role': 'system', 'content': system_prompt},
-                    {'role': 'user', 'content': json.dumps(context, ensure_ascii=False)},
-                ],
+                messages=writing_messages(system_prompt, context),
                 response_format=CreativeOutput,
                 timeout=AZURE_REQUEST_TIMEOUT_SEC,
                 max_completion_tokens=AZURE_MAX_COMPLETION_TOKENS,
@@ -269,6 +269,10 @@ class AzureOpenAIClient:
                 raise NarrativeGenerationError(f'Azure temporarily unavailable ({error.status_code})') from None
             # Authentication, permissions and malformed configuration need correction.
             raise
+        tokens = getattr(getattr(completion, 'usage', None), 'total_tokens', None)
+        if isinstance(tokens, int):
+            self.usage_known = True
+            self.usage += tokens
         if not completion.choices:
             raise NarrativeGenerationError('Azure returned no choices')
         choice = completion.choices[0]
