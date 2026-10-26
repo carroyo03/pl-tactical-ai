@@ -1,7 +1,10 @@
 """Local narrative mistakes and review records for the studio demonstration."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import re
 
-from src.agents.narrator import CreativeOutput, MockLLMClient
+from pydantic import ValidationError
+
+from src.agents.narrator import CreativeOutput
 from src.analytics.schemas import GoalEpisode
 
 DEMO_ERRORS = {
@@ -22,10 +25,32 @@ class RejectedDraft:
 
 
 @dataclass(frozen=True)
+class AttemptReview:
+    """Provenance of one generation attempt, from the provider draft to the critic's verdict."""
+    attempt: int
+    provider: str
+    model: str | None
+    targeted: bool
+    modification_applied: bool
+    note: str
+    original_headline: str | None
+    original_commentary: str | None
+    audited_headline: str | None
+    audited_commentary: str | None
+    accepted: bool
+    feedback: str | None
+
+
+@dataclass(frozen=True)
 class DemoReview:
     error: str
     evidence_explanation: str
     rejected_drafts: tuple[RejectedDraft, ...]
+    attempts: tuple[AttemptReview, ...] = ()
+    # COMPLETED: every targeted draft was altered and rejected by the critic.
+    # NOT_DETECTED: an altered draft was accepted. NOT_EXECUTED: the intervention could not happen.
+    scenario_status: str = 'COMPLETED'
+    scenario_note: str = ''
 
 
 def _wrong_connection(events: list[dict]) -> tuple[str, str] | None:
@@ -75,66 +100,130 @@ def explain_critic_feedback(feedback: str) -> str:
     return 'The draft did not satisfy a factual or output requirement. The recorded technical feedback is available below.'
 
 
-class DemoLLMClient:
-    """Inject one selected mistake once or twice, then return normal offline prose."""
-    provider = 'OFFLINE_MOCK'
+@dataclass
+class ModificationRecord:
+    attempt: int
+    targeted: bool
+    applied: bool = False
+    note: str = ''
+    original: tuple[str, str] | None = None
+    altered: tuple[str, str] | None = None
+    evidence_explanation: str = ''
 
-    def __init__(self, failures: int, error: str = 'invented_player'):
+
+_DURATION_CLAIM = re.compile(
+    r'(?i)((?:sequence duration|episode duration|duraci[oó]n de la (?:jugada|secuencia))'
+    r'\s*(?:(?:is|was|of|at|es|fue|de|del|a)\s*|[:=]\s*)?)(\d+(?:[.,]\d+)?)')
+_PERCENT = re.compile(r'\d+(?:[.,]\d+)?\s*%')
+
+
+def _sentence_end(text: str) -> str:
+    text = text.rstrip()
+    return text if text[-1:] in '.!?' else text + '.'
+
+
+def _alter(error: str, headline: str, commentary: str, context: dict, required_names: list[str]):
+    """Return (headline, commentary, description, evidence explanation) or None if unreliable."""
+    spanish = context['language'] == 'es'
+    events = context['events']
+    if error == 'invented_player':
+        invented, suffix = 'Zorlan Phantom', 0
+        while invented.casefold() in {event['player_name'].casefold() for event in events}:
+            suffix += 1
+            invented = f'Zorlan Phantom{suffix}'
+        sentence = f'{invented} regatea al portero.' if spanish else f'{invented} dribbles past the goalkeeper.'
+        return (headline, _sentence_end(commentary) + ' ' + sentence, f'Added a sentence about {invented}',
+                f'{invented} is absent from the player list and has no recorded actions. Only players present in the episode can be included in the explanation.')
+    if error == 'wrong_recipient':
+        pair = _wrong_connection(events)
+        if pair is None:
+            return None
+        passer, recipient = pair
+        sentence = f'{passer} pasa a {recipient}.' if spanish else f'{passer} passes to {recipient}.'
+        return (headline, _sentence_end(commentary) + ' ' + sentence, f'Added a pass from {passer} to {recipient}',
+                f'The recorded sequence does not support a pass from {passer} to {recipient}. Receivers are inferred from the immediately following event; intervening events cannot be skipped.')
+    if error == 'wrong_action':
+        recovered = {event['player_name'] for event in events
+                     if event['event_type'] == 'RECOVERY' and event['is_successful']}
+        player = next((event['player_name'] for event in events if event['player_name'] not in recovered), None)
+        if player is None:
+            return None
+        sentence = f'{player} recupera el balón.' if spanish else f'{player} wins possession.'
+        return (headline, _sentence_end(commentary) + ' ' + sentence, f'Added a recovery attributed to {player}',
+                f'No successful recovery is recorded for {player}. A recovery by another player cannot be attributed to them.')
+    if error == 'wrong_duration':
+        duration = context['tactical_evidence']['duration_sec']
+        wrong = int(duration) + 60
+        explanation = (f'The goal occurs {duration:g} seconds after the first event. '
+                       f'The draft states {wrong} seconds, which does not match that replay clock.')
+        if _DURATION_CLAIM.search(commentary):
+            return (headline, _DURATION_CLAIM.sub(lambda m: m.group(1) + str(wrong), commentary, count=1),
+                    f'Replaced the stated duration with {wrong} seconds', explanation)
+        sentence = f'Duración de la jugada: {wrong} segundos.' if spanish else f'Sequence duration: {wrong} seconds.'
+        return (headline, _sentence_end(commentary) + ' ' + sentence, f'Added a duration of {wrong} seconds', explanation)
+    if error == 'wrong_accuracy':
+        metrics = context['broadcast_metrics']
+        accuracy = metrics['pass_accuracy']
+        if accuracy is None:
+            return None
+        wrong = 0 if accuracy >= 0.5 else 100
+        explanation = (f'The scoring team completes {metrics["successful_passes"]} of '
+                       f'{metrics["total_passes"]} attempted passes, giving {accuracy * 100:g}% accuracy. '
+                       f'The draft reports {wrong}%, so the percentage must be corrected.')
+        if _PERCENT.search(commentary):
+            return (headline, _PERCENT.sub(f'{wrong}%', commentary, count=1),
+                    f'Replaced the stated percentage with {wrong}%', explanation)
+        sentence = f'Precisión de pase: {wrong}%.' if spanish else f'Pass accuracy: {wrong}%.'
+        return (headline, _sentence_end(commentary) + ' ' + sentence, f'Added a pass accuracy of {wrong}%', explanation)
+    # missing_names: remove every mention of the scorer and the connector.
+    names = sorted(required_names, key=len, reverse=True)
+    if not names:
+        return None
+    stand_in = 'el atacante' if spanish else 'the attacker'
+    altered = []
+    for text in (headline, commentary):
+        for name in names:
+            text = re.sub(r'(?<!\w)' + re.escape(name) + r'(?!\w)', stand_in, text, flags=re.IGNORECASE)
+        altered.append(text)
+    if (altered[1] == commentary
+            or any(re.search(r'(?<!\w)' + re.escape(name) + r'(?!\w)', altered[1], re.IGNORECASE) for name in names)):
+        return None
+    return (altered[0], altered[1], 'Replaced the scorer and connector names with a generic reference',
+            f'The commentary must name the scorer or the selected connector. {" and ".join(names)} are the verified participants, but neither is named in this draft.')
+
+
+class DraftModifier:
+    """Alter a provider's first alterable drafts before review; facts and the critic stay untouched."""
+
+    def __init__(self, error: str, drafts: int):
         if error not in DEMO_ERRORS:
             raise ValueError('Unknown demonstration error')
-        self.failures, self.error, self.calls = failures, error, 0
-        self.drafts: list[CreativeOutput] = []
-        self.evidence_explanation = ''
+        if drafts not in (1, 2):
+            raise ValueError('Between one and two drafts can be altered')
+        self.error, self.limit = error, drafts
+        self.records: list[ModificationRecord] = []
 
-    def generate(self, *, system_prompt: str, context: dict) -> CreativeOutput:
-        self.calls += 1
-        if self.calls > self.failures:
-            return MockLLMClient().generate(system_prompt=system_prompt, context=context)
-        spanish = context['language'] == 'es'
-        anchor = context['scorer_name'] or context['pivot_name']
-        base = f'{anchor} participa en la secuencia.' if spanish else f'{anchor} features in this sequence.'
-        events = context['events']
-        if self.error == 'invented_player':
-            invented = 'Zorlan Phantom'
-            suffix = 0
-            while invented.casefold() in {event['player_name'].casefold() for event in events}:
-                suffix += 1
-                invented = f'Zorlan Phantom{suffix}'
-            commentary = base + (f' {invented} regatea al portero.' if spanish else
-                                  f' {invented} dribbles past the goalkeeper.')
-            self.evidence_explanation = f'{invented} is absent from the player list and has no recorded actions. Only players present in the episode can be included in the explanation.'
-        elif self.error == 'wrong_recipient':
-            pair = _wrong_connection(events)
-            if pair is None:
-                raise ValueError('This episode cannot demonstrate an incorrect receiver')
-            passer, recipient = pair
-            commentary = base + (f' {passer} pasa a {recipient}.' if spanish else f' {passer} passes to {recipient}.')
-            self.evidence_explanation = f'The recorded sequence does not support a pass from {passer} to {recipient}. Receivers are inferred from the immediately following event; intervening events cannot be skipped.'
-        elif self.error == 'wrong_action':
-            recovered = {event['player_name'] for event in events
-                         if event['event_type'] == 'RECOVERY' and event['is_successful']}
-            player = next(event['player_name'] for event in events if event['player_name'] not in recovered)
-            commentary = base + (f' {player} recupera el balón.' if spanish else f' {player} wins possession.')
-            self.evidence_explanation = f'No successful recovery is recorded for {player}. A recovery by another player cannot be attributed to them.'
-        elif self.error == 'wrong_duration':
-            duration = context['tactical_evidence']['duration_sec']
-            wrong = int(duration) + 60
-            commentary = base + (f' Duración de la jugada: {wrong} segundos.' if spanish else
-                                  f' Sequence duration: {wrong} seconds.')
-            self.evidence_explanation = f'The goal occurs {duration:g} seconds after the first event. The draft states {wrong} seconds, which does not match that replay clock.'
-        elif self.error == 'wrong_accuracy':
-            metrics = context['broadcast_metrics']
-            accuracy = metrics['pass_accuracy']
-            if accuracy is None:
-                raise ValueError('This episode has no pass accuracy to contradict')
-            wrong = 0 if accuracy >= 0.5 else 100
-            commentary = base + (f' Precisión de pase: {wrong}%.' if spanish else f' Pass accuracy: {wrong}%.')
-            self.evidence_explanation = (f'The scoring team completes {metrics["successful_passes"]} of '
-                f'{metrics["total_passes"]} attempted passes, giving {accuracy * 100:g}% accuracy. '
-                f'The draft reports {wrong}%, so the percentage must be corrected.')
-        else:
-            commentary = 'La secuencia termina en gol.' if spanish else 'The sequence ends in a goal.'
-            self.evidence_explanation = f'The commentary must name the scorer or the selected connector. {anchor} is one of those verified participants, but neither role is named in this draft.'
-        draft = CreativeOutput(headline='Borrador para revisar' if spanish else 'A draft for review', commentary=commentary)
-        self.drafts.append(draft)
-        return draft
+    def apply(self, attempt: int, proposal: dict, context: dict, required_names: list[str]) -> dict:
+        altered = sum(record.applied for record in self.records)
+        original = (proposal['headline'], proposal['commentary'])
+        record = ModificationRecord(attempt, targeted=altered < self.limit, original=original)
+        self.records.append(record)
+        if not record.targeted:
+            return proposal
+        altered = _alter(self.error, *original, context, required_names)
+        if altered is not None:
+            try:
+                CreativeOutput(headline=altered[0], commentary=altered[1])
+            except ValidationError:
+                altered = None
+        if altered is None:
+            record.note = 'The selected error could not be applied reliably to this draft, so it was left unchanged.'
+            return proposal
+        record.applied, record.altered = True, (altered[0], altered[1])
+        record.note, record.evidence_explanation = altered[2], altered[3]
+        return {**proposal, 'headline': altered[0], 'commentary': altered[1]}
+
+    def record_unavailable(self, attempt: int, reason: str | None) -> None:
+        self.records.append(ModificationRecord(
+            attempt, targeted=sum(r.applied for r in self.records) < self.limit,
+            note=reason or 'No draft was returned.'))

@@ -41,8 +41,9 @@ correction and fallback paths can be inspected step by step.
   snapshot; passing connections are inferred; difficulty is a heuristic score,
   not a calibrated completion probability.
 - **Works without cloud credentials:** the default narrator uses reviewed offline
-  templates. An Azure OpenAI adapter is implemented, but a real Azure model
-  deployment and its quality, latency and cost remain to be validated.
+  templates. Opt-in Groq narration is available locally and has undergone a small
+  synthetic evaluation. The published Azure demo remains offline. An Azure OpenAI
+  adapter is implemented, but a real Azure model deployment remains unvalidated.
 
 The application combines **Python, FastAPI, Streamlit, DuckDB, NetworkX, Plotly
 and Pydantic**, with a custom three-role orchestration workflow. The offline mode
@@ -62,6 +63,50 @@ Open the local URL printed by Streamlit and select a play. No Azure credentials
 are needed for this mode. Backend setup and remote mode are described below.
 
 ## Development setup
+
+### Local real-model preview
+
+The Groq integration is opt-in and local only. Keep your Groq organization on the
+Free plan with paid billing disabled. Put `GROQ_API_KEY` in the ignored root `.env`,
+then run:
+
+```sh
+uv run python scripts/run_groq_studio.py
+```
+
+The launcher loads local settings without overriding existing environment values,
+binds the studio to localhost and bypasses any remote API configuration. A deployed
+studio can enable the same integration explicitly; see [Azure demo deployment](infra/README.md). Select
+your options and press **Generate commentary**. Changing replay position or opening
+an explanation does not call the model. Previous commentary remains labelled with
+its original selections until a new request completes.
+
+Only validated commentary is displayed. A shared, bounded in-memory cache reuses
+identical accepted results. Model failures select a labelled offline explanation;
+configuration errors are recorded without exposing upstream response bodies. The
+generation and recovery window is 20 seconds with at most two provider calls.
+These limits are per process and reset on restart; they are not account-wide
+billing controls. The Azure budget does not cover Groq.
+
+`GROQ_MODEL` selects an evaluation candidate. The local default is
+`openai/gpt-oss-120b`, selected after a small three-candidate comparison and a
+six-case check across the three plays and both languages. Five cases passed on
+the first attempt and one required correction. That sample does not establish
+general factual accuracy, availability or production performance. Manual review
+also led to tighter checks and wording for language consistency. To
+compare up to three candidates, first verify the Free plan in Groq Console:
+
+```sh
+uv run python scripts/evaluate_groq.py --confirm-free-plan
+```
+
+This separate evaluation makes at most six generation requests per model, each
+with at most two provider calls. It is paced and can take several minutes. Results
+and generated text stay in an ignored local report for quality review. It is never
+run by CI. Network failures and quota limits count as evaluation outcomes, not as
+evidence of model quality. No provider data-retention settings are changed by the
+application. Ordinary offline startup remains credential-independent, and the
+published Azure demo is not enabled for Groq by these local commands.
 
 For the container build, local two-service setup and the proposed low-cost Azure
 deployment, see [Azure demo deployment](infra/README.md). The deployment starts
@@ -191,18 +236,28 @@ The top metrics and commentary describe the full episode; the pitch and overlay
 cards follow the clock. History cards remain visible and are muted. A zero-time
 focused recovery may already have an overlay at the start of replay.
 
-Agent demo modes intentionally inject invalid creative drafts locally:
+Agent demo modes alter the active provider's draft locally after it is generated
+(offline mock by default, or the local Groq model when enabled). The Guardrail Critic
+is unchanged and checks the altered text against the original facts:
 
 - Normal: regular offline generation, or the configured remote API.
 - Simulate 1 Critic Retry: first draft fails, feedback repairs the second.
 - Simulate Double Failure -> Fallback: two drafts fail, validated fallback wins.
 
-Under **Test a review scenario**, in **Agent behavior**, select **The first draft is rejected and corrected** or
-**Both drafts are rejected and a fallback is used**. A second selector,
+Open **Test the safety checks** above the commentary and, under **How should the review behave?**, select **One correction** (the first draft is rejected and corrected) or
+**Fallback** (both drafts are rejected and a fallback is used). A second selector,
 **What should go wrong in the draft?**, offers six demonstrations: an invented
 player, an incorrect receiver, a recovery assigned to the wrong player, an
 incorrect duration, an incorrect pass accuracy, or missing scorer/connector names.
 Only cases applicable to the selected episode are offered.
+
+With Groq enabled, a scenario is started by an explicit **Run review scenario** button,
+uses at most two model requests and is never served from the cache. The error is
+introduced by the application, so a recovery shows the pipeline's resilience, not that
+a model ignored an instruction. Each attempt records the provider draft, the alteration
+(or why it could not be applied), and the critic's verdict. The scenario outcome
+(completed, not detected, or not executed, for example after a provider failure) is
+reported separately from the commentary outcome.
 
 The review shows the actual rejected draft, an explanation of the recorded
 validator feedback, and the episode facts that contradict the draft. A final
@@ -283,7 +338,7 @@ core analytics-only tests. They never require a browser or external network.
 2. Use **Key Events** on the left to inspect a moment, the pitch and synchronized overlays.
 3. Read **Why this goal happened** on the right. Change style, language or focus there.
    Personalization preserves the replay position; changing episodes resets it.
-4. Use **Test a review scenario** and **Agent behavior** to demonstrate success,
+4. Use **Test the safety checks** to demonstrate success,
    one critic repair, or a validated safe fallback. Help is available in the header.
 5. Earlier overlays and agent handoffs are available in their expanders.
 

@@ -16,11 +16,13 @@ dependencies = [
     "azure-identity>=1.15.0",
     "duckdb>=0.10.0",
     "fastapi>=0.110.0",
+    "httpx2>=2.12,<3",
     "networkx>=3.2.1",
     "openai>=3.35.1,<4",
     "pandas>=2.2.0",
     "plotly>=5.20.0",
     "pydantic>=2.6.0",
+    "python-dotenv>=1.1,<2",
     "streamlit>=1.66.0,<2",
     "uvicorn>=0.28.0",
 ]

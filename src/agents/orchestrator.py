@@ -24,7 +24,7 @@ class Handoff(StrictModel):
     reason: str
 
 
-Provider = Literal['OFFLINE_MOCK', 'AZURE_OPENAI', 'OFFLINE_FALLBACK', 'CUSTOM', 'UNKNOWN']
+Provider = Literal['OFFLINE_MOCK', 'AZURE_OPENAI', 'GROQ', 'OFFLINE_FALLBACK', 'CUSTOM', 'UNKNOWN']
 
 
 class ExecutionTelemetry(StrictModel):
@@ -35,6 +35,11 @@ class ExecutionTelemetry(StrictModel):
     status: Literal['RUNNING', 'SUCCESS', 'RECOVERED', 'DEGRADED_FALLBACK'] = 'RUNNING'
     generation_provider: Provider = 'UNKNOWN'
     narrative_provider: Provider = 'UNKNOWN'
+    model: str | None = None
+    cache_hit: bool = False
+    generation_latency_ms: float | None = None
+    provider_calls: int = 0
+    total_tokens: int | None = None
 
 
 class OrchestrationState(StrictModel):
@@ -50,6 +55,8 @@ class OrchestrationState(StrictModel):
     tactical_breakdown: str = ''
     proposal: dict | None = None
     generation_error: str | None = None
+    retry_allowed: bool = True
+    rejected_draft: dict | None = None
     narrative: NarrativeOutput | None = None
     telemetry: ExecutionTelemetry = Field(default_factory=ExecutionTelemetry)
 
@@ -98,12 +105,15 @@ class PersonaNarratorAgent:
         prompt += '\nIf focus.participated is true, mention focus.player_name in commentary. Otherwise do not invent participation.'
         if state.telemetry.critic_feedback:
             prompt += '\nRepair the previous draft according to critic_feedback in the JSON context.'
+            if state.rejected_draft is not None:
+                context['rejected_draft'] = {key: state.rejected_draft.get(key) for key in ('headline', 'commentary')}
         try:
             proposed = self.client.generate(system_prompt=prompt, context=context)
             state.proposal = proposed.model_dump()
         except (ValidationError, NarrativeGenerationError) as error:
             # SDK schema failures and explicit refusals are recoverable; bugs propagate.
             state.generation_error = str(error)
+            state.retry_allowed = getattr(error, 'retryable', True)
 
 
 class GuardrailCriticAgent:
@@ -120,9 +130,18 @@ class GuardrailCriticAgent:
             return True
         except (ValidationError, NarrativeGenerationError) as error:
             state.telemetry.critic_feedback.append(str(error))
+            state.rejected_draft = state.proposal
             return False
 
     def fallback(self, state: OrchestrationState) -> None:
+        if state.telemetry.generation_provider == 'GROQ':
+            creative = MockLLMClient().generate(system_prompt=SYSTEM_PROMPT, context=state.context)
+            state.proposal = creative.model_dump()
+            state.generation_error = None
+            if self.audit(state):
+                state.telemetry.status = 'DEGRADED_FALLBACK'
+                state.telemetry.narrative_provider = 'OFFLINE_FALLBACK'
+                return
         # Fixed short headline remains valid even with unusually long player names.
         names = list(dict.fromkeys(state.grounding['required_names'] + (
             [state.focus.player_name] if state.focus.participated else [])))
@@ -140,7 +159,9 @@ class GuardrailCriticAgent:
 
 
 class BroadcastOrchestrator:
-    def __init__(self, client: LLMClient | None = None):
+    def __init__(self, client: LLMClient | None = None, modifier=None):
+        # An optional DraftModifier alters usable drafts before the unchanged critic reviews them.
+        self.modifier = modifier
         self.analyst = TacticalAnalystAgent()
         self.narrator = PersonaNarratorAgent(client if client is not None else MockLLMClient())
         self.critic = GuardrailCriticAgent()
@@ -156,7 +177,7 @@ class BroadcastOrchestrator:
             focus_player_id=focus_player_id,
         )
         provider = getattr(self.narrator.client, 'provider', 'CUSTOM')
-        state.telemetry.generation_provider = provider if provider in ('OFFLINE_MOCK', 'AZURE_OPENAI') else 'CUSTOM'
+        state.telemetry.generation_provider = provider if provider in ('OFFLINE_MOCK', 'AZURE_OPENAI', 'GROQ') else 'CUSTOM'
         self.analyst.run(state)
         state.telemetry.handoffs.append(Handoff(
             from_agent='TacticalAnalystAgent', to_agent='PersonaNarratorAgent', attempt=1,
@@ -164,6 +185,12 @@ class BroadcastOrchestrator:
         ))
         for attempt in (1, 2):
             self.narrator.run(state)
+            if self.modifier is not None:
+                if state.proposal is not None:
+                    state.proposal = self.modifier.apply(
+                        attempt, state.proposal, state.context, state.grounding['required_names'])
+                else:
+                    self.modifier.record_unavailable(attempt, state.generation_error)
             state.telemetry.handoffs.append(Handoff(
                 from_agent='PersonaNarratorAgent', to_agent='GuardrailCriticAgent', attempt=attempt,
                 reason='Audit generated proposal' if not state.generation_error else state.generation_error,
@@ -171,6 +198,13 @@ class BroadcastOrchestrator:
             if self.critic.audit(state):
                 state.telemetry.status = 'SUCCESS' if attempt == 1 else 'RECOVERED'
                 state.telemetry.narrative_provider = state.telemetry.generation_provider
+                break
+            if not state.retry_allowed:
+                self.critic.fallback(state)
+                state.telemetry.handoffs.append(Handoff(
+                    from_agent='GuardrailCriticAgent', to_agent='DeterministicFallback', attempt=attempt,
+                    reason='Generation unavailable; validated offline explanation selected',
+                ))
                 break
             if attempt == 1:
                 state.telemetry.handoffs.append(Handoff(

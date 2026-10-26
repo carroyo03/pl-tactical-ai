@@ -16,6 +16,11 @@ from src.ui.service import StudioService, StudioServiceError
 
 
 class SecurityTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def test_service_boundary_and_readiness(self):
         token = 'test-only-service-token-with-sufficient-length'
         settings = SecuritySettings(service_token=token)

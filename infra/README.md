@@ -124,6 +124,40 @@ The public demo keeps paid model selection explicitly disabled. Enabling a paid
 provider requires a separate access and cost review. See the application settings
 and Azure resource configuration for deployment-specific operational values.
 
+## Optional Groq narration in the studio
+
+Azure OpenAI quota is not available for this project, so the studio can run the
+local Groq integration inside its own container. This is a third-party model
+service, not a Microsoft service; Azure provides the hosting, networking, secret
+storage, monitoring and budget. The Azure OpenAI adapter in the API remains
+unvalidated and is not used by this deployment.
+
+Add these values to the private parameters file (never commit them):
+
+```json
+"enableGroq": { "value": true },
+"groqApiKey": { "value": "<Free plan Groq key>" },
+"groqModel": { "value": "openai/gpt-oss-120b" }
+```
+
+When `enableGroq` is true the studio receives `LLM_PROVIDER=groq` and the key as a
+Container Apps secret. The studio still reads episodes from the internal API, but
+commentary and review scenarios are generated inside the studio process; the API
+never receives a model key or a deliberately altered draft. Keep the Groq
+organization on the Free plan with billing disabled. Bicep cannot require the key
+when `enableGroq` is true, so always set both; with an empty key the studio shows
+"AI commentary is not configured" and keeps the offline preview.
+
+Operational limits to know before a public link is shared:
+
+- Groq limits are per process (four calls per minute, 100 per day, two calls per
+  request, a 20-second window). They reset on restart or scale-to-zero and are not
+  an account-wide guard.
+- Anyone with the public URL can spend that allowance. When it is exhausted the
+  studio shows labelled offline fallback commentary instead of failing.
+- To disable model use quickly, redeploy with `enableGroq` set to false.
+
+
 ## Operations
 
 Dependency maintenance currently includes a narrow Pillow compatibility override

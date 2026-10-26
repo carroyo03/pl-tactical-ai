@@ -43,6 +43,8 @@ class GroundingTests(unittest.TestCase):
             'Milo Arden scores from 37 meters.',
             'Nolan Vale is the tactical pivot. Milo Arden scores.',
             'Evan Rook scores after the move.',
+            'Evan Rook then carries the ball. Milo Arden scores.',
+            'Evan Rook luego conduce el balón. Milo Arden marca.',
             'Evan Rook plays the key pass. Milo Arden finishes.',
             'Milo Arden scores after a pass from the Defensive Third.',
         ]

@@ -121,6 +121,11 @@ class VisualizationTests(unittest.TestCase):
 
 
 class StudioServiceTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def test_episode_discovery_and_all_demo_modes(self):
         service = StudioService()
         ids = service.list_goal_ids()
@@ -166,6 +171,11 @@ class StudioServiceTests(unittest.TestCase):
 
 
 class StreamlitTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def create_app_test(self):
         # Streamlit 1.66 initializes AppTest state on the bare unittest thread.
         # Capture and assert that specific SDK diagnostic, not application warnings.
@@ -175,6 +185,67 @@ class StreamlitTests(unittest.TestCase):
         for record in captured.records:
             self.assertIn('missing ScriptRunContext', record.getMessage())
         return app
+
+    def test_real_model_requires_button_and_keeps_previous_selection(self):
+        from src.agents.narrator import MockLLMClient
+
+        class LocalModel(MockLLMClient):
+            provider = 'GROQ'
+
+        calls = []
+
+        def generate(service, episode, **kwargs):
+            calls.append(kwargs)
+            result = BroadcastOrchestrator(LocalModel()).run(
+                episode, persona=kwargs['persona'], language=kwargs['language'],
+                focus_player_id=kwargs['focus_player_id'])
+            result.telemetry.model = 'test-model'
+            return result
+
+        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}, clear=True), \
+                patch.object(StudioService, 'broadcast', generate):
+            app = self.create_app_test().run()
+            self.assertFalse(app.exception)
+            self.assertFalse(calls, 'Initial display must not request model inference')
+            app.button(key='generate_commentary').click().run()
+            self.assertFalse(app.exception)
+            self.assertEqual(len(calls), 1)
+            old = app.session_state['_groq_story'][1].narrative.commentary
+            app.selectbox(key='language').select('es').run()
+            self.assertEqual(len(calls), 1)
+            self.assertTrue(any('selections have changed' in item.value for item in app.info))
+            self.assertEqual(app.session_state['_groq_story'][1].narrative.commentary, old)
+            app.button(key='milestone_ev_02').click().run()
+            self.assertEqual(len(calls), 1)
+            app.button(key='generate_commentary').click().run()
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[-1]['language'], 'es')
+            self.assertFalse(app.exception)
+
+    def test_model_unavailability_is_explained_without_raw_provider_errors(self):
+        from src.agents.groq_client import ProviderUnavailable
+
+        class UnavailableModel:
+            provider = 'GROQ'
+
+            def generate(self, **kwargs):
+                raise ProviderUnavailable('provider_quota')
+
+        def unavailable(service, episode, **kwargs):
+            result = BroadcastOrchestrator(UnavailableModel()).run(episode)
+            result.telemetry.model = 'test-model'
+            return result
+
+        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}, clear=True), \
+                patch.object(StudioService, 'broadcast', unavailable):
+            app = self.create_app_test().run()
+            app.button(key='generate_commentary').click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any('AI commentary is currently unavailable' in item.value for item in app.warning))
+            markup = ' '.join(item.value for item in app.markdown)
+            self.assertIn('Offline fallback', markup)
+            self.assertIn('before a model draft could be requested', markup)
+            self.assertFalse(any('Draft 1 was rejected' in item.value for item in app.markdown))
 
     def test_offline_controls_replay_caching_and_recovery(self):
         original = StudioService.broadcast
@@ -204,10 +275,9 @@ class StreamlitTests(unittest.TestCase):
             self.assertEqual(len(app.sidebar.selectbox), 0)
             self.assertEqual(len(app.sidebar.button), 0)
             self.assertIn('Help', str(app.get('popover')[0].proto))
-            self.assertEqual(app.selectbox(key='demo_mode').label, 'Agent behavior')
-            self.assertEqual(app.selectbox(key='demo_mode').options, [
-                'Generate commentary normally', 'The first draft is rejected and corrected',
-                'Both drafts are rejected and a fallback is used',
+            self.assertEqual(app.segmented_control(key='demo_mode').label, 'How should the review behave?')
+            self.assertEqual(app.segmented_control(key='demo_mode').options, [
+                'Normal run', 'One correction', 'Fallback',
             ])
             self.assertIn('Focus: Whole team', initial_markup)
             self.assertIn('Packing</span><strong>3', initial_markup)
@@ -294,12 +364,13 @@ class StreamlitTests(unittest.TestCase):
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             app.selectbox(key='focus').set_value('P_99').run()
             self.assertFalse(app.session_state['_broadcast'].focus.participated)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[1]).run()
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'RECOVERED')
             self.assertAlmostEqual(app.session_state['replay_clock'], 3.5)
             recovered_markup = ' '.join(element.value for element in app.markdown)
             self.assertIn('A second draft was generated from the same facts and passed validation.', recovered_markup)
-            self.assertIn('**Draft 1 was rejected**', recovered_markup)
+            self.assertIn('**3. The critic rejected the draft.**', recovered_markup)
+            self.assertIn('**Scenario completed: the selected error was introduced and the critic rejected it.**', recovered_markup)
             walkthrough = next(item for item in app.expander if item.label == 'Step-by-step explanation')
             self.assertFalse(walkthrough.proto.expanded)
             self.assertFalse(any(item.label == 'Test a review scenario' for item in app.expander))
@@ -308,7 +379,7 @@ class StreamlitTests(unittest.TestCase):
             self.assertFalse(app.success)
             self.assertFalse(app.warning)
             self.assertIn('The corrected commentary is displayed above.', recovered_markup)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(app.session_state['_broadcast'].telemetry.status, 'DEGRADED_FALLBACK')
             self.assertIn('passed validation', ' '.join(element.value for element in app.markdown))
             self.assertIn('An offline fallback was assembled', ' '.join(element.value for element in app.markdown))
@@ -335,7 +406,7 @@ class StreamlitTests(unittest.TestCase):
             app = self.create_app_test().run()
             self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
             app.button(key='milestone_ev_02').click().run()
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[1]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[1]).run()
             self.assertEqual(app.selectbox(key='demo_error').label, 'What should go wrong in the draft?')
             for error in DEMO_ERRORS:
                 app.selectbox(key='demo_error').set_value(error).run()
@@ -350,14 +421,14 @@ class StreamlitTests(unittest.TestCase):
                 self.assertTrue(any('A second draft was generated from the same facts and passed validation.' in item.value for item in app.markdown))
                 technical = next(item for item in app.expander if item.label == 'Technical details')
                 self.assertFalse(technical.proto.expanded)
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[2]).run()
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[2]).run()
             self.assertEqual(len(app.session_state['_demo_review'].rejected_drafts), 2)
             self.assertTrue(any('Both drafts were rejected' in item.value for item in app.markdown))
-            self.assertTrue(any('**Draft 2 was rejected**' in item.value for item in app.markdown))
-            app.selectbox(key='demo_mode').set_value(DEMO_MODES[0]).run()
+            self.assertTrue(any('**Attempt 2**' in item.value for item in app.markdown))
+            app.segmented_control(key='demo_mode').set_value(DEMO_MODES[0]).run()
             self.assertIsNone(app.session_state['_demo_review'])
             self.assertFalse(any(item.key == 'demo_error' for item in app.selectbox))
-            self.assertFalse(any('**Draft 1 was rejected**' in item.value for item in app.markdown))
+            self.assertFalse(any('**Attempt 1**' in item.value for item in app.markdown))
             self.assertFalse(app.exception)
 
 

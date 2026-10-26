@@ -27,7 +27,8 @@ def check(command, ready_path, verify, *, environment_updates=None):
     command = [part.replace('{port}', str(selected_port)) for part in command]
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith('AZURE_OPENAI_') and key not in (
-                       'API_BASE_URL', 'API_SERVICE_TOKEN', 'REQUIRE_API_SERVICE_TOKEN')}
+                       'API_BASE_URL', 'API_SERVICE_TOKEN', 'REQUIRE_API_SERVICE_TOKEN',
+                       'GROQ_API_KEY', 'GROQ_MODEL', 'LLM_PROVIDER')}
     for key, value in (environment_updates or {}).items():
         environment[key] = value.replace('{port}', str(selected_port))
     with tempfile.TemporaryFile(mode='w+') as logs:

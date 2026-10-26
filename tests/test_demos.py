@@ -9,6 +9,11 @@ from src.ui.service import DEMO_MODES, StudioService
 
 
 class DemoTests(unittest.TestCase):
+    def setUp(self):
+        provider = patch.dict('os.environ', {'LLM_PROVIDER': ''})
+        provider.start()
+        self.addCleanup(provider.stop)
+
     def test_all_cases_recover_or_fallback_for_every_episode_and_language(self):
         service = StudioService()
         for payload in generate_mock_episodes():

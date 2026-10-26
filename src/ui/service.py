@@ -16,7 +16,7 @@ from src.analytics.broadcast import BroadcastMetrics
 from src.analytics.schemas import GoalEpisode, TacticalAnalysisResponse
 from src.ingest.mock_generator import generate_mock_episodes, generate_mock_reconstruction
 from src.ingest.repository import DuckDBRepository
-from src.ui.demos import DemoLLMClient, DemoReview, RejectedDraft, available_demo_errors
+from src.ui.demos import AttemptReview, DemoReview, DraftModifier, RejectedDraft, available_demo_errors
 from src.api.security import AdmissionControl, SecuritySettings
 
 DemoMode = Literal['Normal', 'Simulate 1 Critic Retry', 'Simulate Double Failure -> Fallback']
@@ -102,19 +102,22 @@ class StudioService:
 
     def broadcast(self, episode: GoalEpisode, *, persona='TACTICAL_ANALYST', language='en',
                   focus_player_id: str | None = None, mode: DemoMode = 'Normal',
-                  demo_error: str = 'invented_player') -> BroadcastResponse:
+                  demo_error: str = 'invented_player', cancel_event=None) -> BroadcastResponse:
         with studio_capacity():
             return self._broadcast(episode, persona=persona, language=language,
-                                   focus_player_id=focus_player_id, mode=mode, demo_error=demo_error)
+                                   focus_player_id=focus_player_id, mode=mode, demo_error=demo_error, cancel_event=cancel_event)
 
     def _broadcast(self, episode: GoalEpisode, *, persona, language, focus_player_id, mode,
-                   demo_error) -> BroadcastResponse:
+                   demo_error, cancel_event=None) -> BroadcastResponse:
         self.demo_review = None
         if mode not in DEMO_MODES:
             raise ValueError('Unknown demo mode')
         if mode != 'Normal' and demo_error not in available_demo_errors(episode):
             raise ValueError('This demonstration error is not available for the episode')
-        if self.api_base_url and mode == 'Normal':
+        from src.agents.groq_client import enabled, local_runtime
+        # Groq runs inside this process. When it is enabled explicitly (LLM_PROVIDER), episodes
+        # may still come from a remote API, but generation never goes through that API.
+        if self.api_base_url and mode == 'Normal' and not enabled():
             params = dict(persona=persona, language=language)
             if focus_player_id is not None:
                 params['focus_player_id'] = focus_player_id
@@ -123,15 +126,57 @@ class StudioService:
                 return parse_broadcast(payload, persona=persona, language=language)
             except (KeyError, TypeError, ValidationError) as error:
                 raise StudioServiceError('API returned an invalid broadcast contract.') from error
-        client = MockLLMClient() if mode == 'Normal' else DemoLLMClient(1 if mode == DEMO_MODES[1] else 2, demo_error)
-        result = BroadcastOrchestrator(client).run(
-            episode, persona=persona, language=language, focus_player_id=focus_player_id,
-            reconstruction=generate_mock_reconstruction(episode),
-        )
-        if isinstance(client, DemoLLMClient):
-            self.demo_review = DemoReview(
-                error=demo_error, evidence_explanation=client.evidence_explanation,
-                rejected_drafts=tuple(RejectedDraft(draft.headline, draft.commentary, feedback)
-                                      for draft, feedback in zip(client.drafts, result.telemetry.critic_feedback)),
+        modifier = None if mode == 'Normal' else DraftModifier(demo_error, 1 if mode == DEMO_MODES[1] else 2)
+        # Scenarios are never sent to a remote API: they use Groq here when enabled, else the offline mock.
+        if enabled():
+            try:
+                runtime = local_runtime()
+            except ValueError as error:
+                raise StudioServiceError('AI commentary is not configured. Please check the local model settings.') from error
+            result = runtime.run(episode, persona=persona, language=language, focus_player_id=focus_player_id,
+                                 cancel_event=cancel_event, modifier=modifier)
+        else:
+            result = BroadcastOrchestrator(MockLLMClient(), modifier).run(
+                episode, persona=persona, language=language, focus_player_id=focus_player_id,
+                reconstruction=generate_mock_reconstruction(episode),
             )
+        if modifier is not None:
+            self.demo_review = build_review(modifier, result, demo_error)
         return result
+
+
+def build_review(modifier: DraftModifier, result: BroadcastResponse, error: str) -> DemoReview:
+    """Join the modifier's records with the critic's verdicts, one entry per attempt."""
+    telemetry = result.telemetry
+    feedback = telemetry.critic_feedback
+    attempts, rejected = [], []
+    for record in modifier.records:
+        rejected_here = record.attempt <= len(feedback)
+        shown = record.altered if record.applied else record.original
+        verdict = feedback[record.attempt - 1] if rejected_here else None
+        attempts.append(AttemptReview(
+            attempt=record.attempt, provider=telemetry.generation_provider, model=telemetry.model,
+            targeted=record.targeted, modification_applied=record.applied, note=record.note,
+            original_headline=record.original[0] if record.original else None,
+            original_commentary=record.original[1] if record.original else None,
+            audited_headline=shown[0] if shown else None, audited_commentary=shown[1] if shown else None,
+            accepted=not rejected_here and shown is not None, feedback=verdict,
+        ))
+        if shown is not None and verdict is not None:
+            rejected.append(RejectedDraft(shown[0], shown[1], verdict))
+    altered = [a for a in attempts if a.modification_applied]
+    status, note = 'COMPLETED', ''
+    if any(a.accepted for a in altered):
+        status, note = 'NOT_DETECTED', 'An altered draft was accepted by the critic, so the selected error was not detected.'
+    elif len(altered) < modifier.limit:
+        missing = next((a for a in attempts if a.targeted and not a.modification_applied), None)
+        status = 'NOT_EXECUTED'
+        note = (('The provider did not return a usable draft: ' + missing.note) if missing and missing.original_commentary is None
+                else missing.note if missing else 'Fewer drafts than the scenario requires were available.')
+    elif modifier.limit == 1 and altered[0].attempt == 2:
+        note = 'The first provider draft was unavailable, so no correction attempt remained after the altered draft.'
+    first = next((record for record in modifier.records if record.applied), None)
+    return DemoReview(
+        error=error, evidence_explanation=first.evidence_explanation if first else '',
+        rejected_drafts=tuple(rejected), attempts=tuple(attempts), scenario_status=status, scenario_note=note,
+    )

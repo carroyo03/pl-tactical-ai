@@ -25,8 +25,41 @@ param monthlyBudgetAmount int = 10
 
 param budgetStartDate string = utcNow('yyyy-MM-01')
 
+@description('Opt in to Groq narration inside the public studio container. The API stays offline.')
+param enableGroq bool = false
+
+@description('Groq API key from a Free plan organization. Required only when enableGroq is true.')
+@secure()
+param groqApiKey string = ''
+
+@allowed([
+  'openai/gpt-oss-20b'
+  'openai/gpt-oss-120b'
+  'qwen/qwen3.8-27b'
+])
+param groqModel string = 'openai/gpt-oss-120b'
+
 var apiName = '${namePrefix}-api'
 var studioName = '${namePrefix}-studio'
+var studioSecrets = concat(
+  [
+    {
+      name: 'api-service-token'
+      value: serviceToken
+    }
+  ],
+  enableGroq ? [
+    {
+      name: 'groq-api-key'
+      value: groqApiKey
+    }
+  ] : []
+)
+var studioGroqEnv = enableGroq ? [
+  { name: 'LLM_PROVIDER', value: 'groq' }
+  { name: 'GROQ_API_KEY', secretRef: 'groq-api-key' }
+  { name: 'GROQ_MODEL', value: groqModel }
+] : []
 
 resource workspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${namePrefix}-logs'
@@ -160,12 +193,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: [
-        {
-          name: 'api-service-token'
-          value: serviceToken
-        }
-      ]
+      secrets: studioSecrets
       ingress: {
         external: true
         targetPort: 8080
@@ -183,7 +211,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
             '-m'
             'src.ui.gateway'
           ]
-          env: [
+          env: concat([
             { name: 'API_SERVICE_TOKEN', secretRef: 'api-service-token' }
             { name: 'STUDIO_REQUEST_RATE', value: string(operatingLimits.studioRequestRate) }
             { name: 'STUDIO_CONNECTION_LIMIT', value: string(operatingLimits.studioConnections) }
@@ -193,7 +221,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = {
               name: 'API_BASE_URL'
               value: 'https://${api.properties.configuration.ingress.fqdn}'
             }
-          ]
+          ], studioGroqEnv)
           resources: {
             cpu: json('0.25')
             memory: '0.5Gi'

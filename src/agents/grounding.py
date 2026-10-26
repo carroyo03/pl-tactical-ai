@@ -78,7 +78,7 @@ def audit_event_claims(text: str, facts: dict) -> None:
     for name, recorded in by_name.items():
         player = re.escape(name)
         for predicate, kind, successful in predicates:
-            if re.search(rf'(?<!\w){player}\s+{predicate}', content):
+            if re.search(rf'(?<!\w){player}\s+(?:(?:then|immediately|next|subsequently|luego|despues|seguidamente)\s+){{0,2}}{predicate}', content):
                 if not any(event['event_type'] == kind and (not successful or event['is_successful'])
                            for event in recorded):
                     raise GroundingError(f'Player action is not supported by recorded {kind} events')
