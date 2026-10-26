@@ -75,7 +75,8 @@ uv run python scripts/run_groq_studio.py
 ```
 
 The launcher loads local settings without overriding existing environment values,
-binds the studio to localhost and bypasses any remote API configuration. Select
+binds the studio to localhost and bypasses any remote API configuration. A deployed
+studio can enable the same integration explicitly; see [Azure demo deployment](infra/README.md). Select
 your options and press **Generate commentary**. Changing replay position or opening
 an explanation does not call the model. Previous commentary remains labelled with
 its original selections until a new request completes.

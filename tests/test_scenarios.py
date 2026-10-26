@@ -133,12 +133,23 @@ class ScenarioTests(unittest.TestCase):
         self.assertEqual(service.demo_review.attempts[0].provider, 'GROQ')
         self.assertEqual(service.demo_review.scenario_status, 'COMPLETED')
 
-    def test_remote_configuration_keeps_scenarios_offline_even_with_groq_enabled(self):
+    def test_remote_configuration_without_groq_keeps_scenarios_offline(self):
         service = StudioService('https://example.invalid')
-        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}), patch(
-                'src.agents.groq_client.local_runtime', side_effect=AssertionError('no model request')):
+        with patch.object(service, '_request', side_effect=AssertionError('no remote request')):
             result = service.broadcast(episodes()[0], mode=DEMO_MODES[1])
         self.assertEqual(result.telemetry.generation_provider, 'OFFLINE_MOCK')
+
+    def test_remote_episodes_with_studio_side_groq_never_call_the_remote_broadcast(self):
+        service = StudioService('https://example.invalid')
+        runtime = GroqRuntime('unused', MODELS[0], transport=FakeTransport())
+        with patch.dict('os.environ', {'LLM_PROVIDER': 'groq'}), patch(
+                'src.agents.groq_client.local_runtime', return_value=runtime), patch.object(
+                service, '_request', side_effect=AssertionError('generation must stay in the studio')):
+            normal = service.broadcast(episodes()[0])
+            scenario = service.broadcast(episodes()[0], mode=DEMO_MODES[2], demo_error='wrong_accuracy')
+        self.assertEqual(normal.telemetry.generation_provider, 'GROQ')
+        self.assertEqual(scenario.telemetry.status, 'DEGRADED_FALLBACK')
+        self.assertEqual(service.demo_review.scenario_status, 'COMPLETED')
 
 
 if __name__ == '__main__':

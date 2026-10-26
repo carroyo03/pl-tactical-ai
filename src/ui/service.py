@@ -114,7 +114,10 @@ class StudioService:
             raise ValueError('Unknown demo mode')
         if mode != 'Normal' and demo_error not in available_demo_errors(episode):
             raise ValueError('This demonstration error is not available for the episode')
-        if self.api_base_url and mode == 'Normal':
+        from src.agents.groq_client import enabled, local_runtime
+        # Groq runs inside this process. When it is enabled explicitly (LLM_PROVIDER), episodes
+        # may still come from a remote API, but generation never goes through that API.
+        if self.api_base_url and mode == 'Normal' and not enabled():
             params = dict(persona=persona, language=language)
             if focus_player_id is not None:
                 params['focus_player_id'] = focus_player_id
@@ -123,10 +126,9 @@ class StudioService:
                 return parse_broadcast(payload, persona=persona, language=language)
             except (KeyError, TypeError, ValidationError) as error:
                 raise StudioServiceError('API returned an invalid broadcast contract.') from error
-        from src.agents.groq_client import enabled, local_runtime
         modifier = None if mode == 'Normal' else DraftModifier(demo_error, 1 if mode == DEMO_MODES[1] else 2)
-        # A remote API configuration never receives scenarios; they stay local and offline.
-        if enabled() and not (self.api_base_url and modifier is not None):
+        # Scenarios are never sent to a remote API: they use Groq here when enabled, else the offline mock.
+        if enabled():
             try:
                 runtime = local_runtime()
             except ValueError as error:

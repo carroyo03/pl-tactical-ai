@@ -351,8 +351,9 @@ def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     service = StudioService(os.getenv('API_BASE_URL') or None)
     from src.agents.groq_client import enabled, DEFAULT_MODEL
-    real_local = enabled() and not service.api_base_url
-    source = 'Local / Groq' if real_local else 'Remote API' if service.api_base_url else 'Local / offline'
+    real_local = enabled()
+    source = ('Groq / Remote API data' if service.api_base_url else 'Local / Groq') if real_local else (
+        'Remote API' if service.api_base_url else 'Local / offline')
     with st.container(key='studio_header'):
         title_column, help_column = st.columns([6, 1], vertical_alignment='center')
         title_column.markdown('<div class="studio-bar"><h1>Broadcast studio</h1></div>', unsafe_allow_html=True)
